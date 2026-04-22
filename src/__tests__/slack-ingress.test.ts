@@ -12,6 +12,7 @@ import {
   parseSlackEventPayload,
   parseSlackInteractivityPayload,
 } from '../slack/parsing';
+import { getRouteRawBody } from '../slack/payload';
 import {
   jsonRouteResponse,
   slackAcknowledgementResponse,
@@ -20,6 +21,7 @@ import {
   createSlackSignature,
   verifySlackSignature,
 } from '../slack/signature';
+import { verifySlackRouteSignature } from '../slack/route-security';
 import { buildWorkerHandoffRequest } from '../slack/worker-handoff';
 import approvalView from '../views/slack-agent-approval-index.view';
 import requestView from '../views/slack-agent-request-index.view';
@@ -137,6 +139,72 @@ describe('Slack signature verification', () => {
         nowSeconds: 1712347000,
       }),
     ).toBe(false);
+  });
+});
+
+describe('Slack route security', () => {
+  it('should accept legacy verification token fallback for parsed route bodies', () => {
+    const previousSigningSecret = process.env.SLACK_SIGNING_SECRET;
+    const previousVerificationToken = process.env.SLACK_VERIFICATION_TOKEN;
+
+    process.env.SLACK_SIGNING_SECRET = 'test-signing-secret';
+    process.env.SLACK_VERIFICATION_TOKEN = 'legacy-token';
+
+    try {
+      expect(
+        verifySlackRouteSignature({
+          body: {
+            token: 'legacy-token',
+            team_id: 'T123',
+            text: 'find acme',
+          },
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded',
+            'x-slack-request-timestamp': '1712345678',
+            'x-slack-signature': 'v0=invalid',
+          },
+          pathParameters: {},
+          queryStringParameters: {},
+          isBase64Encoded: false,
+          requestContext: {
+            http: {
+              method: 'POST',
+              path: '/s/slack-to-crm/commands',
+            },
+          },
+        }),
+      ).toEqual({ ok: true });
+    } finally {
+      process.env.SLACK_SIGNING_SECRET = previousSigningSecret;
+      process.env.SLACK_VERIFICATION_TOKEN = previousVerificationToken;
+    }
+  });
+});
+
+describe('Slack raw body reconstruction', () => {
+  it('should reconstruct form encoded bodies parsed by Twenty routes', () => {
+    expect(
+      getRouteRawBody({
+        body: {
+          token: 'abc',
+          team_id: 'T123',
+          channel_id: 'C123',
+          text: 'find acme',
+        },
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        pathParameters: {},
+        queryStringParameters: {},
+        isBase64Encoded: false,
+        requestContext: {
+          http: {
+            method: 'POST',
+            path: '/s/slack-to-crm/commands',
+          },
+        },
+      }),
+    ).toBe('token=abc&team_id=T123&channel_id=C123&text=find+acme');
   });
 });
 

@@ -88,6 +88,7 @@ export const SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS = {
 
 export const APPLICATION_VARIABLE_UNIVERSAL_IDENTIFIERS = {
   slackSigningSecret: 'b481f99e-93b9-4ad5-bab7-0ba909e2a589',
+  slackVerificationToken: '9b309371-33c8-48de-9342-dd16047916b5',
   slackBotToken: 'a6b0ee2a-3a24-4ecf-9718-bd4d98e1c627',
   slackAllowedChannelIds: 'f9c01faa-4a56-46ea-91e5-7553f1a969a4',
   workerBaseUrl: '2e3b8092-cbe7-48b1-81f4-429960b82532',

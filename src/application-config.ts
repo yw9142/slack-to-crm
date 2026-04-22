@@ -20,6 +20,14 @@ export default defineApplication({
       value: '',
       isSecret: true,
     },
+    SLACK_VERIFICATION_TOKEN: {
+      universalIdentifier:
+        APPLICATION_VARIABLE_UNIVERSAL_IDENTIFIERS.slackVerificationToken,
+      description:
+        'Optional Slack legacy verification token fallback for parsed route bodies.',
+      value: '',
+      isSecret: true,
+    },
     SLACK_BOT_TOKEN: {
       universalIdentifier: APPLICATION_VARIABLE_UNIVERSAL_IDENTIFIERS.slackBotToken,
       description: 'Slack bot token for worker-owned Slack API calls.',

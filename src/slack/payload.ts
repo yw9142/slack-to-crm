@@ -79,7 +79,23 @@ export function getRouteRawBody(event: RoutePayload<unknown>): string {
     return '';
   }
 
+  if (isJsonObject(event.body) && isFormUrlEncodedRoute(event)) {
+    return new URLSearchParams(
+      Object.entries(event.body).flatMap(([key, value]) =>
+        typeof value === 'string' ? [[key, value]] : [],
+      ),
+    ).toString();
+  }
+
   return JSON.stringify(event.body);
+}
+
+function isFormUrlEncodedRoute(event: RoutePayload<unknown>): boolean {
+  return (
+    getHeaderValue(event.headers, 'content-type')
+      ?.toLowerCase()
+      .includes('application/x-www-form-urlencoded') ?? false
+  );
 }
 
 export function parseFormBody(body: unknown): URLSearchParams {
