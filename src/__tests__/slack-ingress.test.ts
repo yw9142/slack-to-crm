@@ -63,6 +63,30 @@ describe('Twenty app manifests', () => {
   });
 });
 
+describe('Slack Events route handler', () => {
+  it('should answer URL verification challenges before signature checks', async () => {
+    const response = await slackEventsLogicFunction.config.handler({
+      body: {
+        type: 'url_verification',
+        token: 'legacy-verification-token',
+        challenge: 'challenge-value',
+      },
+      headers: {},
+      pathParameters: {},
+      queryStringParameters: {},
+      isBase64Encoded: false,
+      requestContext: {
+        http: {
+          method: 'POST',
+          path: '/s/slack-to-crm/events',
+        },
+      },
+    });
+
+    expect(response).toEqual({ challenge: 'challenge-value' });
+  });
+});
+
 describe('Slack signature verification', () => {
   it('should verify valid Slack signatures and reject mismatches', () => {
     const signingSecret = 'test-signing-secret';

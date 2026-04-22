@@ -6,11 +6,7 @@ import {
 
 import { LOGIC_FUNCTION_UNIVERSAL_IDENTIFIERS } from 'src/constants/universal-identifiers';
 import { isSlackChannelAllowed, parseSlackEventPayload } from 'src/slack/parsing';
-import {
-  jsonRouteResponse,
-  textRouteResponse,
-  type RouteResponse,
-} from 'src/slack/route-response';
+import { jsonRouteResponse, type RouteResponse } from 'src/slack/route-response';
 import {
   SLACK_FORWARDED_REQUEST_HEADERS,
   verifySlackRouteSignature,
@@ -24,6 +20,12 @@ import {
 import { handoffSlackAgentRequestToWorker } from 'src/slack/worker-handoff';
 
 const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => {
+  const slackEvent = parseSlackEventPayload(event.body);
+
+  if (slackEvent.kind === 'URL_VERIFICATION') {
+    return jsonRouteResponse(200, { challenge: slackEvent.challenge });
+  }
+
   const signatureResult = verifySlackRouteSignature(event);
 
   if (!signatureResult.ok) {
@@ -31,12 +33,6 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
       ok: false,
       error: signatureResult.message,
     });
-  }
-
-  const slackEvent = parseSlackEventPayload(event.body);
-
-  if (slackEvent.kind === 'URL_VERIFICATION') {
-    return textRouteResponse(200, slackEvent.challenge);
   }
 
   if (slackEvent.kind === 'UNSUPPORTED' || slackEvent.isBotEvent) {
