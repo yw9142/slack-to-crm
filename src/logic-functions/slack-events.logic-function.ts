@@ -76,7 +76,16 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
 
   const handoffResult = await handoffSlackAgentRequestToWorker({
     endpoint: 'process',
+    context: { slackAgentThreadId },
+    slack: {
+      channelId: slackEvent.channelId,
+      messageTs: slackEvent.slackMessageTs,
+      teamId: slackEvent.teamId,
+      threadTs: slackEvent.slackThreadTs,
+      userId: slackEvent.userId,
+    },
     slackAgentRequestId,
+    text: slackEvent.text,
   });
 
   if (!handoffResult.ok) {

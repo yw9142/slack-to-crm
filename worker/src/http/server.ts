@@ -7,10 +7,16 @@ import type {
   SlackAgentApplyRequest,
   SlackAgentContext,
   SlackAgentProcessRequest,
+  SlackAgentApplyResponse,
+  SlackAgentProcessResponse,
   WriteDraft,
 } from '../types';
 import { isJsonRecord } from '../types';
 import { isAuthorizedRequest } from './auth';
+import {
+  postSlackApplyResponse,
+  postSlackProcessResponse,
+} from '../slack/response-url';
 
 const DEFAULT_MAX_BODY_BYTES = 1_000_000;
 
@@ -64,12 +70,34 @@ export const handleHttpRequest = async (
     );
 
     if (url.pathname === '/internal/slack-agent/process') {
-      const result = await options.agentRunner.process(parseProcessRequest(body));
+      const parsedRequest = parseProcessRequest(body);
+
+      if (parsedRequest.responseUrl) {
+        runProcessInBackground({
+          agentRunner: options.agentRunner,
+          request: parsedRequest,
+        });
+        writeJson(response, 202, { status: 'accepted' });
+        return;
+      }
+
+      const result = await options.agentRunner.process(parsedRequest);
       writeJson(response, 200, result);
       return;
     }
 
-    const result = await options.agentRunner.apply(parseApplyRequest(body));
+    const parsedRequest = parseApplyRequest(body);
+
+    if (parsedRequest.responseUrl) {
+      runApplyInBackground({
+        agentRunner: options.agentRunner,
+        request: parsedRequest,
+      });
+      writeJson(response, 202, { status: 'accepted' });
+      return;
+    }
+
+    const result = await options.agentRunner.apply(parsedRequest);
     writeJson(response, 200, result);
   } catch (error) {
     if (error instanceof BadRequestError) {
@@ -128,6 +156,8 @@ const parseProcessRequest = (body: unknown): SlackAgentProcessRequest => {
   return {
     context: readRecord(body, 'context'),
     requestId: readString(body, 'requestId') ?? slackAgentRequestId,
+    responseUrl:
+      readString(body, 'responseUrl') ?? readString(body, 'slackResponseUrl'),
     slack: parseSlackContext(body),
     slackAgentRequestId,
     text: readString(body, 'text') ?? readString(body, 'slackMessageText'),
@@ -147,6 +177,8 @@ const parseApplyRequest = (body: unknown): SlackAgentApplyRequest => {
     slackAgentApprovalId:
       readString(body, 'slackAgentApprovalId') ?? readString(body, 'approvalId'),
     slackAgentRequestId: readString(body, 'slackAgentRequestId'),
+    responseUrl:
+      readString(body, 'responseUrl') ?? readString(body, 'slackResponseUrl'),
   };
 };
 
@@ -258,4 +290,46 @@ const writeJson = (
   response.statusCode = statusCode;
   response.setHeader('content-type', 'application/json; charset=utf-8');
   response.end(JSON.stringify(body));
+};
+
+const runProcessInBackground = ({
+  agentRunner,
+  request,
+}: {
+  agentRunner: AgentRunner;
+  request: SlackAgentProcessRequest;
+}): void => {
+  void agentRunner
+    .process(request)
+    .then((result: SlackAgentProcessResponse) =>
+      postSlackProcessResponse({ request, result }),
+    )
+    .catch((error: unknown) =>
+      postSlackProcessResponse({
+        errorMessage:
+          error instanceof Error ? error.message : 'Unknown worker error',
+        request,
+      }),
+    );
+};
+
+const runApplyInBackground = ({
+  agentRunner,
+  request,
+}: {
+  agentRunner: AgentRunner;
+  request: SlackAgentApplyRequest;
+}): void => {
+  void agentRunner
+    .apply(request)
+    .then((result: SlackAgentApplyResponse) =>
+      postSlackApplyResponse({ request, result }),
+    )
+    .catch((error: unknown) =>
+      postSlackApplyResponse({
+        errorMessage:
+          error instanceof Error ? error.message : 'Unknown worker error',
+        request,
+      }),
+    );
 };

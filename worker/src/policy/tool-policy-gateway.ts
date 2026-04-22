@@ -91,8 +91,20 @@ export class ToolPolicyGateway {
     const classification = classifyToolName(toolCall.name);
     const toolArguments = toolCall.arguments ?? {};
 
-    if (classification === 'read' || classification === 'meta') {
-      const result = await this.readMcpClient.callTool(
+    if (classification === 'meta') {
+      const result = await this.readMcpClient.callTool(toolCall.name, toolArguments);
+
+      return {
+        classification,
+        kind: 'tool_result',
+        result,
+        toolCall,
+      };
+    }
+
+    if (classification === 'read') {
+      const result = await this.executeTwentyTool(
+        this.readMcpClient,
         toolCall.name,
         toolArguments,
       );
@@ -123,14 +135,11 @@ export class ToolPolicyGateway {
   public async applyApprovedDraft(
     input: ApplyApprovedDraftInput,
   ): Promise<ApplyApprovedDraftResult> {
-    const result = await this.writeMcpClient.callTool('execute_tool', {
-      approvalId: input.approvalId,
-      approvedAt: this.now().toISOString(),
-      approvedBySlackUserId: input.approvedBySlackUserId,
-      arguments: input.draft.arguments,
-      draftId: input.draft.id,
-      toolName: input.draft.toolName,
-    });
+    const result = await this.executeTwentyTool(
+      this.writeMcpClient,
+      input.draft.toolName,
+      input.draft.arguments,
+    );
 
     return {
       draftId: input.draft.id,
@@ -143,7 +152,20 @@ export class ToolPolicyGateway {
     toolName: string,
     toolArguments: JsonRecord = {},
   ): Promise<McpToolCallResult> {
-    return this.readMcpClient.callTool(toolName, toolArguments);
+    const classification = classifyToolName(toolName);
+
+    if (classification === 'meta') {
+      return this.readMcpClient.callTool(toolName, toolArguments);
+    }
+
+    return this.executeTwentyTool(this.readMcpClient, toolName, toolArguments);
+  }
+
+  public callSystemWriteTool(
+    toolName: string,
+    toolArguments: JsonRecord = {},
+  ): Promise<McpToolCallResult> {
+    return this.executeTwentyTool(this.writeMcpClient, toolName, toolArguments);
   }
 
   private createWriteDraft(
@@ -159,5 +181,16 @@ export class ToolPolicyGateway {
       status: 'pending_approval',
       toolName: toolCall.name,
     };
+  }
+
+  private executeTwentyTool(
+    mcpClient: TwentyMcpToolClient,
+    toolName: string,
+    toolArguments: JsonRecord,
+  ): Promise<McpToolCallResult> {
+    return mcpClient.callTool('execute_tool', {
+      arguments: toolArguments,
+      toolName,
+    });
   }
 }

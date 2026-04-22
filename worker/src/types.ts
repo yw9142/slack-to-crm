@@ -20,6 +20,7 @@ export type SlackAgentProcessRequest = {
   requestId?: string;
   slack?: SlackAgentContext;
   text?: string;
+  responseUrl?: string;
   context?: JsonRecord;
   toolCalls?: AgentToolCall[];
 };
@@ -59,6 +60,7 @@ export type SlackAgentApplyRequest = {
   draft?: WriteDraft;
   approvedBySlackUserId?: string;
   approvalId?: string;
+  responseUrl?: string;
 };
 
 export type SlackAgentApplyResponse = {

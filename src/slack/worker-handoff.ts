@@ -11,6 +11,10 @@ export type WorkerHandoffRequestInput = {
   slackAgentApprovalId?: string;
   approvedBySlackUserId?: string;
   workerPayload?: Record<string, unknown>;
+  text?: string;
+  responseUrl?: string;
+  slack?: Record<string, string | undefined>;
+  context?: Record<string, unknown>;
   workerBaseUrl?: string;
   workerSharedSecret?: string;
 };
@@ -27,6 +31,10 @@ export function buildWorkerHandoffRequest({
   slackAgentApprovalId,
   approvedBySlackUserId,
   workerPayload,
+  text,
+  responseUrl,
+  slack,
+  context,
   workerBaseUrl = process.env.WORKER_BASE_URL,
   workerSharedSecret = process.env.WORKER_SHARED_SECRET,
 }: WorkerHandoffRequestInput): { url: string; init: RequestInit } {
@@ -48,11 +56,18 @@ export function buildWorkerHandoffRequest({
   );
   const body =
     endpoint === 'process'
-      ? { slackAgentRequestId }
+      ? {
+          slackAgentRequestId,
+          ...(text ? { text } : {}),
+          ...(responseUrl ? { responseUrl } : {}),
+          ...(slack ? { slack } : {}),
+          ...(context ? { context } : {}),
+        }
       : {
           slackAgentRequestId,
           slackAgentApprovalId,
           approvedBySlackUserId,
+          ...(responseUrl ? { responseUrl } : {}),
           ...(workerPayload ?? {}),
         };
 

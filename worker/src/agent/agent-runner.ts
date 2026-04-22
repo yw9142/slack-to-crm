@@ -81,9 +81,20 @@ export class AgentRunner {
       }
     }
 
-    return {
+    const persistenceMetadata = await this.persistProcessResult({
       assistantMessage,
       metadata,
+      request,
+      toolResults,
+      writeDrafts,
+    });
+
+    return {
+      assistantMessage,
+      metadata: {
+        ...(metadata ?? {}),
+        ...persistenceMetadata,
+      },
       status: writeDrafts.length > 0 ? 'needs_approval' : 'completed',
       toolResults,
       writeDrafts,
@@ -105,6 +116,12 @@ export class AgentRunner {
       approvalId: request.approvalId ?? request.slackAgentApprovalId,
       approvedBySlackUserId: request.approvedBySlackUserId ?? 'unknown-slack-user',
       draft,
+    });
+
+    await this.persistApplyResult({
+      approvalId: request.approvalId ?? request.slackAgentApprovalId,
+      applyResult: applyResult.result,
+      request,
     });
 
     return {
@@ -177,6 +194,107 @@ export class AgentRunner {
     );
 
     return context;
+  }
+
+  private async persistProcessResult({
+    assistantMessage,
+    metadata,
+    request,
+    toolResults,
+    writeDrafts,
+  }: {
+    assistantMessage: string;
+    metadata?: JsonRecord;
+    request: SlackAgentProcessRequest;
+    toolResults: ToolExecutionRecord[];
+    writeDrafts: WriteDraft[];
+  }): Promise<JsonRecord> {
+    const approvalIds: string[] = [];
+    const lastProcessedAt = new Date().toISOString();
+
+    try {
+      for (const draft of writeDrafts) {
+        const approvalResult = await this.policyGateway.callSystemWriteTool(
+          'create_slack_agent_approval',
+          {
+            actions: { drafts: [draft] },
+            position: 'first',
+            slackAgentRequestId: request.slackAgentRequestId,
+            status: 'PENDING',
+            summary: assistantMessage,
+            title: `Approval for ${draft.toolName}`,
+            workerPayload: { draft },
+          },
+        );
+        const approvalId = extractRecordId(approvalResult);
+
+        if (approvalId) {
+          approvalIds.push(approvalId);
+        }
+      }
+
+      await this.policyGateway.callSystemWriteTool('update_slack_agent_request', {
+        answerText: assistantMessage,
+        draftPayload:
+          writeDrafts.length > 0 ? { drafts: writeDrafts } : undefined,
+        id: request.slackAgentRequestId,
+        lastProcessedAt,
+        mode: writeDrafts.length > 0 ? 'WRITE_DRAFT' : 'ANSWER',
+        pendingApprovalId: approvalIds[0],
+        resultPayload: {
+          metadata,
+          toolResults,
+          writeDrafts,
+        },
+        status: writeDrafts.length > 0 ? 'AWAITING_APPROVAL' : 'COMPLETED',
+      });
+    } catch (error) {
+      return {
+        persistenceError:
+          error instanceof Error ? error.message : 'Unknown persistence error',
+      };
+    }
+
+    return approvalIds.length > 0 ? { approvalIds } : {};
+  }
+
+  private async persistApplyResult({
+    approvalId,
+    applyResult,
+    request,
+  }: {
+    approvalId?: string;
+    applyResult: unknown;
+    request: SlackAgentApplyRequest;
+  }): Promise<void> {
+    try {
+      if (approvalId) {
+        await this.policyGateway.callSystemWriteTool(
+          'update_slack_agent_approval',
+          {
+            appliedResult: normalizeJsonRecord(applyResult),
+            decidedAt: new Date().toISOString(),
+            id: approvalId,
+            slackApproverUserId: request.approvedBySlackUserId,
+            status: 'APPROVED',
+          },
+        );
+      }
+
+      if (request.slackAgentRequestId) {
+        await this.policyGateway.callSystemWriteTool(
+          'update_slack_agent_request',
+          {
+            id: request.slackAgentRequestId,
+            lastProcessedAt: new Date().toISOString(),
+            mode: 'APPLIED',
+            status: 'COMPLETED',
+          },
+        );
+      }
+    } catch {
+      // Applying the approved CRM change is the source of truth. Audit writes are best effort.
+    }
   }
 
   private async loadDraftFromApproval(
@@ -287,4 +405,46 @@ const normalizeWriteDraft = (value: JsonRecord): WriteDraft | null => {
     status: 'pending_approval',
     toolName: value.toolName,
   };
+};
+
+const extractRecordId = (value: unknown): string | null => {
+  if (!isJsonRecord(value)) {
+    return null;
+  }
+
+  if (typeof value.id === 'string') {
+    return value.id;
+  }
+
+  for (const candidateKey of ['result', 'record', 'data']) {
+    const nested = extractRecordId(value[candidateKey]);
+
+    if (nested) {
+      return nested;
+    }
+  }
+
+  if (Array.isArray(value.content)) {
+    for (const contentItem of value.content) {
+      if (!isJsonRecord(contentItem) || typeof contentItem.text !== 'string') {
+        continue;
+      }
+
+      const nested = extractRecordId(parseJsonText(contentItem.text));
+
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+};
+
+const normalizeJsonRecord = (value: unknown): JsonRecord => {
+  if (isJsonRecord(value)) {
+    return value;
+  }
+
+  return { value };
 };

@@ -179,7 +179,10 @@ describe('Worker handoff request shape', () => {
   it('should build process handoff requests with shared-secret auth', () => {
     const request = buildWorkerHandoffRequest({
       endpoint: 'process',
+      responseUrl: 'https://hooks.slack.com/commands/123',
+      slack: { channelId: 'C123', teamId: 'T123', userId: 'U123' },
       slackAgentRequestId: 'request-123',
+      text: 'find acme',
       workerBaseUrl: 'https://worker.example',
       workerSharedSecret: 'shared-secret',
     });
@@ -192,7 +195,12 @@ describe('Worker handoff request shape', () => {
     expect(headers.authorization).toBe('Bearer shared-secret');
     expect(headers['x-slack-agent-shared-secret']).toBe('shared-secret');
     expect(request.init.body).toBe(
-      JSON.stringify({ slackAgentRequestId: 'request-123' }),
+      JSON.stringify({
+        slackAgentRequestId: 'request-123',
+        text: 'find acme',
+        responseUrl: 'https://hooks.slack.com/commands/123',
+        slack: { channelId: 'C123', teamId: 'T123', userId: 'U123' },
+      }),
     );
   });
 });

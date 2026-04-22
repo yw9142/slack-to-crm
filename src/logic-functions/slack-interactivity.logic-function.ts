@@ -72,6 +72,7 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
   const handoffResult = await handoffSlackAgentRequestToWorker({
     endpoint: 'apply',
     approvedBySlackUserId: interactivity.userId,
+    responseUrl: interactivity.responseUrl,
     slackAgentRequestId: interactivity.slackAgentRequestId,
     slackAgentApprovalId: interactivity.slackAgentApprovalId,
     workerPayload: interactivity.workerPayload,

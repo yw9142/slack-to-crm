@@ -53,7 +53,7 @@ const createGateway = () => {
 };
 
 describe('ToolPolicyGateway', () => {
-  it('passes read tools through to the read MCP client', async () => {
+  it('runs read tools through execute_tool on the read MCP client', async () => {
     const { gateway, readMcpClient, writeMcpClient } = createGateway();
 
     const result = await gateway.executeToolCall({
@@ -68,9 +68,12 @@ describe('ToolPolicyGateway', () => {
     expect(readMcpClient.calls).toEqual([
       {
         arguments: {
-          limit: 5,
+          arguments: {
+            limit: 5,
+          },
+          toolName: 'find_people',
         },
-        name: 'find_people',
+        name: 'execute_tool',
       },
     ]);
     expect(writeMcpClient.calls).toHaveLength(0);
@@ -215,14 +218,10 @@ describe('ToolPolicyGateway', () => {
 
     expect(params.name).toBe('execute_tool');
     expect(params.arguments).toEqual({
-      approvalId: 'approval-1',
-      approvedAt: '2026-04-22T00:00:00.000Z',
-      approvedBySlackUserId: 'U123',
       arguments: {
         id: 'person-1',
         name: 'Grace Hopper',
       },
-      draftId: 'draft-1',
       toolName: 'update_person',
     });
   });
