@@ -2,6 +2,9 @@
   "name": "slack-to-crm",
   "version": "0.1.0",
   "license": "MIT",
+  "workspaces": [
+    "worker"
+  ],
   "engines": {
     "node": "^24.5.0",
     "npm": "please-use-yarn",
@@ -14,6 +17,7 @@
     "lint": "oxlint -c .oxlintrc.json .",
     "lint:fix": "oxlint --fix -c .oxlintrc.json .",
     "test": "vitest run",
+    "test:integration": "vitest run -c vitest.integration.config.ts",
     "test:watch": "vitest"
   },
   "dependencies": {

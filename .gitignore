@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+node_modules/
+/worker/node_modules
 /.pnp
 .pnp.*
 .yarn
@@ -14,6 +16,7 @@ generated
 
 # dev
 /dist/
+/worker/dist/
 
 .twenty
 
@@ -32,6 +35,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!worker/.env.example
 
 # typescript
 *.tsbuildinfo
