@@ -1,0 +1,15 @@
+.git
+.twenty
+.yarn
+node_modules
+worker/node_modules
+dist
+worker/dist
+coverage
+build
+*.log
+*.pem
+*.tgz
+.env
+.env.*
+!worker/.env.example
