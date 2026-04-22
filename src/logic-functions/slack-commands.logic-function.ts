@@ -104,7 +104,7 @@ export default defineLogicFunction({
   timeoutSeconds: 10,
   handler,
   httpRouteTriggerSettings: {
-    path: '/slack/commands',
+    path: '/slack-to-crm/commands',
     httpMethod: HTTPMethod.POST,
     isAuthRequired: false,
     forwardedRequestHeaders: SLACK_FORWARDED_REQUEST_HEADERS,

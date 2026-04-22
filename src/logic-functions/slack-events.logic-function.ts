@@ -119,7 +119,7 @@ export default defineLogicFunction({
   timeoutSeconds: 10,
   handler,
   httpRouteTriggerSettings: {
-    path: '/slack/events',
+    path: '/slack-to-crm/events',
     httpMethod: HTTPMethod.POST,
     isAuthRequired: false,
     forwardedRequestHeaders: SLACK_FORWARDED_REQUEST_HEADERS,

@@ -110,7 +110,7 @@ export default defineLogicFunction({
   timeoutSeconds: 10,
   handler,
   httpRouteTriggerSettings: {
-    path: '/slack/interactivity',
+    path: '/slack-to-crm/interactivity',
     httpMethod: HTTPMethod.POST,
     isAuthRequired: false,
     forwardedRequestHeaders: SLACK_FORWARDED_REQUEST_HEADERS,

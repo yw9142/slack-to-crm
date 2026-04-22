@@ -1,15 +1,67 @@
 import { describe, expect, it } from 'vitest';
 
+import approvalNavigationMenuItem from '../navigation-menu-items/slack-agent-approvals.navigation-menu-item';
+import requestNavigationMenuItem from '../navigation-menu-items/slack-agent-requests.navigation-menu-item';
+import threadNavigationMenuItem from '../navigation-menu-items/slack-agent-threads.navigation-menu-item';
+import toolTraceNavigationMenuItem from '../navigation-menu-items/slack-agent-tool-traces.navigation-menu-item';
+import slackCommandsLogicFunction from '../logic-functions/slack-commands.logic-function';
+import slackEventsLogicFunction from '../logic-functions/slack-events.logic-function';
+import slackInteractivityLogicFunction from '../logic-functions/slack-interactivity.logic-function';
 import {
   parseSlackCommandPayload,
   parseSlackEventPayload,
   parseSlackInteractivityPayload,
 } from '../slack/parsing';
 import {
+  jsonRouteResponse,
+  slackAcknowledgementResponse,
+} from '../slack/route-response';
+import {
   createSlackSignature,
   verifySlackSignature,
 } from '../slack/signature';
 import { buildWorkerHandoffRequest } from '../slack/worker-handoff';
+import approvalView from '../views/slack-agent-approval-index.view';
+import requestView from '../views/slack-agent-request-index.view';
+import threadView from '../views/slack-agent-thread-index.view';
+import toolTraceView from '../views/slack-agent-tool-trace-index.view';
+
+describe('Twenty app manifests', () => {
+  it('should expose Slack ingress under app-specific public routes', () => {
+    expect(slackCommandsLogicFunction.success).toBe(true);
+    expect(slackEventsLogicFunction.success).toBe(true);
+    expect(slackInteractivityLogicFunction.success).toBe(true);
+    expect(
+      slackCommandsLogicFunction.config.httpRouteTriggerSettings?.path,
+    ).toBe('/slack-to-crm/commands');
+    expect(slackEventsLogicFunction.config.httpRouteTriggerSettings?.path).toBe(
+      '/slack-to-crm/events',
+    );
+    expect(
+      slackInteractivityLogicFunction.config.httpRouteTriggerSettings?.path,
+    ).toBe('/slack-to-crm/interactivity');
+  });
+
+  it('should define audit views and navigation menu items', () => {
+    const views = [requestView, threadView, approvalView, toolTraceView];
+    const navigationMenuItems = [
+      requestNavigationMenuItem,
+      threadNavigationMenuItem,
+      approvalNavigationMenuItem,
+      toolTraceNavigationMenuItem,
+    ];
+
+    for (const view of views) {
+      expect(view.success).toBe(true);
+      expect(view.config.fields?.length).toBeGreaterThan(0);
+    }
+
+    for (const navigationMenuItem of navigationMenuItems) {
+      expect(navigationMenuItem.success).toBe(true);
+      expect(navigationMenuItem.config.viewUniversalIdentifier).toBeTruthy();
+    }
+  });
+});
 
 describe('Slack signature verification', () => {
   it('should verify valid Slack signatures and reject mismatches', () => {
@@ -61,6 +113,16 @@ describe('Slack signature verification', () => {
         nowSeconds: 1712347000,
       }),
     ).toBe(false);
+  });
+});
+
+describe('Slack route responses', () => {
+  it('should return direct Twenty route response payloads', () => {
+    expect(jsonRouteResponse(401, { ok: false })).toEqual({ ok: false });
+    expect(slackAcknowledgementResponse('queued')).toEqual({
+      response_type: 'ephemeral',
+      text: 'queued',
+    });
   });
 });
 

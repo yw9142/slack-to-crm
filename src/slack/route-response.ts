@@ -1,31 +1,19 @@
-export type RouteResponse = {
-  statusCode: number;
-  headers: Record<string, string>;
-  body: string;
-};
+export type RouteResponse = Record<string, unknown> | string;
 
 export function jsonRouteResponse(
-  statusCode: number,
+  _statusCode: number,
   body: Record<string, unknown>,
 ): RouteResponse {
-  return {
-    statusCode,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  };
+  return body;
 }
 
-export function textRouteResponse(statusCode: number, body: string): RouteResponse {
-  return {
-    statusCode,
-    headers: { 'content-type': 'text/plain' },
-    body,
-  };
+export function textRouteResponse(_statusCode: number, body: string): RouteResponse {
+  return body;
 }
 
 export function slackAcknowledgementResponse(text: string): RouteResponse {
-  return jsonRouteResponse(200, {
+  return {
     response_type: 'ephemeral',
     text,
-  });
+  };
 }

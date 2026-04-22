@@ -100,3 +100,57 @@ export const LOGIC_FUNCTION_UNIVERSAL_IDENTIFIERS = {
   slackCommands: '50e22fde-a5b4-411c-b382-3eb5e0faeae1',
   slackInteractivity: 'f54c9cf0-3e75-4e96-8503-bedaa9e5efe3',
 } as const;
+
+export const SLACK_AGENT_VIEW_UNIVERSAL_IDENTIFIERS = {
+  requests: '43f42b5f-5d5d-452f-9dc2-dbb79a1ee1ff',
+  toolTraces: '32b042b2-5973-440b-8c8c-93936baa6eab',
+  approvals: 'c162768a-9040-4b1b-9744-f1fffb7c6c6f',
+  threads: 'adfd9a9d-24c6-4a95-b82f-6920d0631ded',
+} as const;
+
+export const SLACK_AGENT_NAVIGATION_MENU_ITEM_UNIVERSAL_IDENTIFIERS = {
+  requests: '5fea8287-8bbd-4c87-9ba7-707305456b60',
+  toolTraces: '97f521ad-bb49-429e-94ec-b11cd19ec60d',
+  approvals: '0b72588a-b1e8-4d66-9369-5f23cab2a020',
+  threads: '1a6db5f0-cc71-49ab-9105-214e9e0b5015',
+} as const;
+
+export const SLACK_AGENT_VIEW_FIELD_UNIVERSAL_IDENTIFIERS = {
+  requestTitle: 'bb4716ff-8eff-4d85-bd67-abafe79c3471',
+  requestStatus: '33c634e9-b30f-4e88-a06c-af60414f1b0c',
+  requestMode: 'be0851c0-a87c-4ac1-9f59-b4ba979a3683',
+  requestSource: '1b1df9cc-edf8-4f04-a718-ff5f326b7f6e',
+  requestSlackChannelId: '1e2f4994-e64d-4059-96ef-e98dbf9503a7',
+  requestSlackUserId: '7c77791a-e0b1-42b2-9966-99dbb7082b93',
+  requestText: 'fbd2cbf1-8137-4a33-ada2-fe1e775d6dfe',
+  requestAnswerText: '1394d3be-852f-4fe9-a8ae-854086afc684',
+  requestErrorMessage: '39797886-298c-42d1-9704-dd00e57ec848',
+  requestReceivedAt: 'c4da7930-64a7-4116-a14e-8fbc73ddca34',
+  requestLastProcessedAt: '2e3a2602-94f2-4862-bca3-dc1888bd959c',
+  requestRawPayload: 'dc538914-4a06-414f-923c-3b7057adc73c',
+  threadTitle: '1d4e1e95-3cef-4672-838e-d6ddf6dbde3e',
+  threadStatus: '828ba59b-53b0-46fe-a5b2-44f8515c6d30',
+  threadSlackChannelId: 'cf5d014c-e8f3-4875-b100-c597d19a24db',
+  threadSlackThreadTs: '53bb1fbe-b5ef-4a14-a872-d8d962a065f0',
+  threadLatestSlackMessageTs: '91a9a27f-1dc1-4ed8-809f-fb7044ac5700',
+  threadLatestSlackAgentRequestId: '347e4e2e-addc-4867-8e61-9cad5081e9a0',
+  threadSummary: '5f5bba41-a84d-4588-92f5-481bd6215cd2',
+  threadPendingApproval: '0e71e842-8eca-4766-8222-5a9d45a00290',
+  approvalTitle: 'de7ca56e-ec96-41fa-9762-50f9f9d257f4',
+  approvalStatus: 'e1578c68-c449-4bec-87af-a16bf159cc61',
+  approvalSlackAgentRequestId: 'ee180036-405b-47b1-b1e2-ba2847c6a1ff',
+  approvalSlackApproverUserId: 'e8e6bfa6-7b76-4183-bb7f-f96777b75ca5',
+  approvalDecidedAt: 'c76cd7e0-5694-47b2-bd9d-da5ea036a63d',
+  approvalSummary: '9f420d11-0b76-4dd2-bdb2-86ab779fb71d',
+  approvalActions: 'cec8cc42-1a51-45f2-9468-260171e0d036',
+  approvalAppliedResult: '0de1f15a-f7cd-4f6f-a87b-411d6dca05b0',
+  toolTraceTitle: 'e97368f5-318e-4a85-b3bd-30057c43f89d',
+  toolTraceStatus: 'e84f7ba5-4c65-47ee-87df-254cc1ac1bd0',
+  toolTraceToolName: '69853eeb-c883-4750-bad6-483b1da9d3ce',
+  toolTraceSlackAgentRequestId: '3371d703-f700-4de8-8710-6df9a515661d',
+  toolTraceDurationMs: '505a5d20-7cc4-400d-a955-5138a8492282',
+  toolTraceErrorMessage: '330a0a65-8ad4-4633-bce0-949542c63716',
+  toolTraceStartedAt: 'dfdc6480-7fc6-44ab-b1c9-c32c622c4eab',
+  toolTraceFinishedAt: '03b27dbb-099c-402b-9f86-4fb137677889',
+  toolTraceInput: '6d14ad68-7ea4-439c-9b56-04166c188a57',
+} as const;
