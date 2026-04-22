@@ -28,6 +28,7 @@ type SlackAgentRequestInput = SlackAgentThreadInput & {
   slackUserName?: string;
   command?: string;
   text?: string;
+  normalizedText?: string;
   responseUrl?: string;
   rawPayload: JsonObject;
 };
@@ -109,8 +110,10 @@ export async function createSlackAgentRequestRecord(
           slackUserName: input.slackUserName ?? null,
           command: input.command ?? null,
           text: input.text ?? null,
+          normalizedText: input.normalizedText ?? input.text ?? null,
           responseUrl: input.responseUrl ?? null,
           rawPayload: input.rawPayload,
+          receivedAt: new Date().toISOString(),
           slackAgentThreadId: input.slackAgentThreadId ?? null,
         },
       },

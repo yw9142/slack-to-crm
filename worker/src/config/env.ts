@@ -6,6 +6,7 @@ export type WorkerEnv = {
   codexWorkingDirectory: string;
   port: number;
   sharedSecret: string;
+  slackBotToken?: string;
   twentyMcpUrl: string;
   twentyMcpReadToken: string;
   twentyMcpWriteToken: string;
@@ -46,6 +47,7 @@ export const loadWorkerEnv = (
   sharedSecret:
     source.SLACK_AGENT_SHARED_SECRET ??
     readRequiredEnv(source, 'WORKER_SHARED_SECRET'),
+  slackBotToken: source.SLACK_BOT_TOKEN,
   twentyMcpUrl: readRequiredEnv(source, 'TWENTY_MCP_URL'),
   twentyMcpReadToken: readRequiredEnv(source, 'TWENTY_MCP_READ_TOKEN'),
   twentyMcpWriteToken: readRequiredEnv(source, 'TWENTY_MCP_WRITE_TOKEN'),

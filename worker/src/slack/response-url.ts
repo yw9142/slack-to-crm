@@ -8,6 +8,7 @@ import type {
 } from '../types';
 
 type SlackBlock = JsonRecord;
+type SlackFetch = typeof fetch;
 
 type PostProcessResponseInput =
   | {
@@ -32,6 +33,11 @@ type PostApplyResponseInput =
       result?: never;
       errorMessage: string;
     };
+
+type PostChannelProcessResponseInput = PostProcessResponseInput & {
+  fetchImplementation?: SlackFetch;
+  slackBotToken: string;
+};
 
 export const postSlackProcessResponse = async (
   input: PostProcessResponseInput,
@@ -65,6 +71,52 @@ export const postSlackProcessResponse = async (
   });
 };
 
+export const postSlackChannelProcessResponse = async (
+  input: PostChannelProcessResponseInput,
+): Promise<void> => {
+  const channelId = input.request.slack?.channelId;
+
+  if (!channelId) {
+    return;
+  }
+
+  if ('errorMessage' in input) {
+    await postSlackMessage({
+      fetchImplementation: input.fetchImplementation,
+      payload: buildThreadPayload(input.request, {
+        channel: channelId,
+        text: `CRM agent 처리에 실패했습니다: ${input.errorMessage}`,
+      }),
+      slackBotToken: input.slackBotToken,
+    });
+    return;
+  }
+
+  const { result } = input;
+
+  if (result.status === 'needs_approval') {
+    await postSlackMessage({
+      fetchImplementation: input.fetchImplementation,
+      payload: buildThreadPayload(input.request, {
+        blocks: buildApprovalBlocks(input.request, result),
+        channel: channelId,
+        text: buildApprovalText(result),
+      }),
+      slackBotToken: input.slackBotToken,
+    });
+    return;
+  }
+
+  await postSlackMessage({
+    fetchImplementation: input.fetchImplementation,
+    payload: buildThreadPayload(input.request, {
+      channel: channelId,
+      text: result.assistantMessage,
+    }),
+    slackBotToken: input.slackBotToken,
+  });
+};
+
 export const postSlackApplyResponse = async (
   input: PostApplyResponseInput,
 ): Promise<void> => {
@@ -86,6 +138,56 @@ export const postSlackApplyResponse = async (
   });
 };
 
+const buildThreadPayload = (
+  request: SlackAgentProcessRequest,
+  payload: JsonRecord,
+): JsonRecord => {
+  const threadTs = request.slack?.threadTs ?? request.slack?.messageTs;
+
+  return {
+    ...payload,
+    ...(threadTs ? { thread_ts: threadTs } : {}),
+    unfurl_links: false,
+    unfurl_media: false,
+  };
+};
+
+const postSlackMessage = async ({
+  fetchImplementation = fetch,
+  payload,
+  slackBotToken,
+}: {
+  fetchImplementation?: SlackFetch;
+  payload: JsonRecord;
+  slackBotToken: string;
+}): Promise<void> => {
+  const response = await fetchImplementation(
+    'https://slack.com/api/chat.postMessage',
+    {
+      body: JSON.stringify(payload),
+      headers: {
+        authorization: `Bearer ${slackBotToken}`,
+        'content-type': 'application/json; charset=utf-8',
+      },
+      method: 'POST',
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Slack chat.postMessage returned HTTP ${response.status}`);
+  }
+
+  const responseBody = (await response.json()) as unknown;
+
+  if (
+    isJsonRecord(responseBody) &&
+    responseBody.ok === false &&
+    typeof responseBody.error === 'string'
+  ) {
+    throw new Error(`Slack chat.postMessage failed: ${responseBody.error}`);
+  }
+};
+
 const postResponseUrl = async (
   responseUrl: string,
   payload: JsonRecord,
@@ -100,6 +202,9 @@ const postResponseUrl = async (
     throw new Error(`Slack response_url returned HTTP ${response.status}`);
   }
 };
+
+const isJsonRecord = (value: unknown): value is JsonRecord =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const buildApprovalText = (result: SlackAgentProcessResponse): string =>
   [

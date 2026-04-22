@@ -51,6 +51,7 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
     });
   }
 
+  const normalizedText = normalizeMentionText(slackEvent.text);
   const slackAgentThreadId = await createSlackAgentThreadRecord({
     slackTeamId: slackEvent.teamId,
     slackChannelId: slackEvent.channelId,
@@ -66,6 +67,7 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
     slackMessageTs: slackEvent.slackMessageTs,
     slackUserId: slackEvent.userId,
     text: slackEvent.text,
+    normalizedText,
     rawPayload: slackEvent.rawPayload,
   });
 
@@ -85,7 +87,7 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
       userId: slackEvent.userId,
     },
     slackAgentRequestId,
-    text: slackEvent.text,
+    text: normalizedText,
   });
 
   if (!handoffResult.ok) {
@@ -101,6 +103,12 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
     slackAgentRequestId,
     handoffOk: handoffResult.ok,
   });
+};
+
+const normalizeMentionText = (text: string | undefined): string | undefined => {
+  const normalizedText = text?.replace(/^(?:<@[A-Z0-9]+>\s*)+/u, '').trim();
+
+  return normalizedText && normalizedText.length > 0 ? normalizedText : text;
 };
 
 export default defineLogicFunction({

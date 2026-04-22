@@ -59,6 +59,7 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
     slackUserName: command.userName,
     command: command.command,
     text: command.text,
+    normalizedText: command.text,
     responseUrl: command.responseUrl,
     rawPayload: command.rawPayload,
   });

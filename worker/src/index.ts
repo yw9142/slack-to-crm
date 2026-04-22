@@ -9,6 +9,7 @@ export const startWorker = (): Server => {
   const server = createHttpServer({
     agentRunner: createAgentRunner({ env }),
     sharedSecret: env.sharedSecret,
+    slackBotToken: env.slackBotToken,
   });
 
   server.listen(env.port, () => {

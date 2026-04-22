@@ -36,12 +36,17 @@ export type WriteDraft = {
 };
 
 export type ToolExecutionRecord = {
+  durationMs?: number;
+  errorMessage?: string;
+  finishedAt?: string;
+  input?: JsonRecord;
   toolCallId?: string;
   toolName: string;
   kind: 'read' | 'meta' | 'write_draft' | 'denied' | 'applied';
   result?: unknown;
   draft?: WriteDraft;
   message?: string;
+  startedAt?: string;
 };
 
 export type AgentRunStatus = 'completed' | 'needs_approval';

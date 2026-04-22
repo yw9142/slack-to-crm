@@ -140,10 +140,19 @@ export class AgentRunner {
     const writeDrafts: WriteDraft[] = [];
 
     for (const toolCall of toolCalls) {
+      const startedAt = new Date();
       const policyResult = await this.policyGateway.executeToolCall(toolCall);
+      const finishedAt = new Date();
+      const traceMetadata = {
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        finishedAt: finishedAt.toISOString(),
+        input: toolCall.arguments ?? {},
+        startedAt: startedAt.toISOString(),
+      };
 
       if (policyResult.kind === 'tool_result') {
         toolResults.push({
+          ...traceMetadata,
           kind: policyResult.classification,
           result: policyResult.result,
           toolCallId: toolCall.id,
@@ -154,6 +163,7 @@ export class AgentRunner {
       if (policyResult.kind === 'write_draft') {
         writeDrafts.push(policyResult.draft);
         toolResults.push({
+          ...traceMetadata,
           draft: policyResult.draft,
           kind: 'write_draft',
           toolCallId: toolCall.id,
@@ -163,6 +173,7 @@ export class AgentRunner {
 
       if (policyResult.kind === 'denied') {
         toolResults.push({
+          ...traceMetadata,
           kind: 'denied',
           message: policyResult.message,
           toolCallId: toolCall.id,
@@ -248,6 +259,11 @@ export class AgentRunner {
         },
         status: writeDrafts.length > 0 ? 'AWAITING_APPROVAL' : 'COMPLETED',
       });
+
+      await this.persistToolTraces({
+        request,
+        toolResults,
+      });
     } catch (error) {
       return {
         persistenceError:
@@ -256,6 +272,57 @@ export class AgentRunner {
     }
 
     return approvalIds.length > 0 ? { approvalIds } : {};
+  }
+
+  private async persistToolTraces({
+    request,
+    toolResults,
+  }: {
+    request: SlackAgentProcessRequest;
+    toolResults: ToolExecutionRecord[];
+  }): Promise<void> {
+    const slackAgentThreadId =
+      typeof request.context?.slackAgentThreadId === 'string'
+        ? request.context.slackAgentThreadId
+        : undefined;
+
+    for (const toolResult of toolResults) {
+      await this.createToolTrace({
+        durationMs: toolResult.durationMs,
+        errorMessage: toolResult.errorMessage,
+        finishedAt: toolResult.finishedAt,
+        input: toolResult.input,
+        output: normalizeJsonRecord(
+          toolResult.result ??
+            toolResult.draft ??
+            (toolResult.message ? { message: toolResult.message } : null),
+        ),
+        slackAgentRequestId: request.slackAgentRequestId,
+        slackAgentThreadId,
+        startedAt: toolResult.startedAt,
+        status: mapToolTraceStatus(toolResult),
+        toolName: toolResult.toolName,
+      });
+    }
+  }
+
+  private async createToolTrace(input: JsonRecord): Promise<void> {
+    const toolNames = [
+      'create_slack_agent_tool_trace',
+      'create_slackAgentToolTrace',
+    ];
+
+    for (const toolName of toolNames) {
+      try {
+        await this.policyGateway.callSystemWriteTool(toolName, {
+          ...input,
+          title: `${String(input.status)} ${String(input.toolName)}`,
+        });
+        return;
+      } catch {
+        // Try the next naming convention exposed by the MCP catalog.
+      }
+    }
   }
 
   private async persistApplyResult({
@@ -439,6 +506,22 @@ const extractRecordId = (value: unknown): string | null => {
   }
 
   return null;
+};
+
+const mapToolTraceStatus = (toolResult: ToolExecutionRecord): string => {
+  if (toolResult.errorMessage) {
+    return 'FAILED';
+  }
+
+  if (toolResult.kind === 'write_draft') {
+    return 'DRAFTED';
+  }
+
+  if (toolResult.kind === 'denied') {
+    return 'BLOCKED';
+  }
+
+  return 'SUCCEEDED';
 };
 
 const normalizeJsonRecord = (value: unknown): JsonRecord => {

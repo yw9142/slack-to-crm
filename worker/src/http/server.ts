@@ -14,6 +14,7 @@ import type {
 import { isJsonRecord } from '../types';
 import { isAuthorizedRequest } from './auth';
 import {
+  postSlackChannelProcessResponse,
   postSlackApplyResponse,
   postSlackProcessResponse,
 } from '../slack/response-url';
@@ -23,6 +24,7 @@ const DEFAULT_MAX_BODY_BYTES = 1_000_000;
 export type WorkerHttpServerOptions = {
   agentRunner: AgentRunner;
   sharedSecret: string;
+  slackBotToken?: string;
   maxBodyBytes?: number;
 };
 
@@ -76,6 +78,16 @@ export const handleHttpRequest = async (
         runProcessInBackground({
           agentRunner: options.agentRunner,
           request: parsedRequest,
+        });
+        writeJson(response, 202, { status: 'accepted' });
+        return;
+      }
+
+      if (options.slackBotToken && parsedRequest.slack?.channelId) {
+        runProcessInBackground({
+          agentRunner: options.agentRunner,
+          request: parsedRequest,
+          slackBotToken: options.slackBotToken,
         });
         writeJson(response, 202, { status: 'accepted' });
         return;
@@ -295,21 +307,38 @@ const writeJson = (
 const runProcessInBackground = ({
   agentRunner,
   request,
+  slackBotToken,
 }: {
   agentRunner: AgentRunner;
   request: SlackAgentProcessRequest;
+  slackBotToken?: string;
 }): void => {
   void agentRunner
     .process(request)
-    .then((result: SlackAgentProcessResponse) =>
-      safePostSlackProcessResponse({ request, result }),
-    )
+    .then((result: SlackAgentProcessResponse) => {
+      if (slackBotToken && !request.responseUrl) {
+        return safePostSlackChannelProcessResponse({
+          request,
+          result,
+          slackBotToken,
+        });
+      }
+
+      return safePostSlackProcessResponse({ request, result });
+    })
     .catch((error: unknown) =>
-      safePostSlackProcessResponse({
-        errorMessage:
-          error instanceof Error ? error.message : 'Unknown worker error',
-        request,
-      }),
+      slackBotToken && !request.responseUrl
+        ? safePostSlackChannelProcessResponse({
+            errorMessage:
+              error instanceof Error ? error.message : 'Unknown worker error',
+            request,
+            slackBotToken,
+          })
+        : safePostSlackProcessResponse({
+            errorMessage:
+              error instanceof Error ? error.message : 'Unknown worker error',
+            request,
+          }),
     );
 };
 
@@ -341,6 +370,16 @@ const safePostSlackProcessResponse = async (
     await postSlackProcessResponse(input);
   } catch {
     // Slack response_url failures should not crash the worker process.
+  }
+};
+
+const safePostSlackChannelProcessResponse = async (
+  input: Parameters<typeof postSlackChannelProcessResponse>[0],
+): Promise<void> => {
+  try {
+    await postSlackChannelProcessResponse(input);
+  } catch {
+    // Slack Web API failures should not crash the worker process.
   }
 };
 
