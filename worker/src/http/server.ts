@@ -302,10 +302,10 @@ const runProcessInBackground = ({
   void agentRunner
     .process(request)
     .then((result: SlackAgentProcessResponse) =>
-      postSlackProcessResponse({ request, result }),
+      safePostSlackProcessResponse({ request, result }),
     )
     .catch((error: unknown) =>
-      postSlackProcessResponse({
+      safePostSlackProcessResponse({
         errorMessage:
           error instanceof Error ? error.message : 'Unknown worker error',
         request,
@@ -323,13 +323,33 @@ const runApplyInBackground = ({
   void agentRunner
     .apply(request)
     .then((result: SlackAgentApplyResponse) =>
-      postSlackApplyResponse({ request, result }),
+      safePostSlackApplyResponse({ request, result }),
     )
     .catch((error: unknown) =>
-      postSlackApplyResponse({
+      safePostSlackApplyResponse({
         errorMessage:
           error instanceof Error ? error.message : 'Unknown worker error',
         request,
       }),
     );
+};
+
+const safePostSlackProcessResponse = async (
+  input: Parameters<typeof postSlackProcessResponse>[0],
+): Promise<void> => {
+  try {
+    await postSlackProcessResponse(input);
+  } catch {
+    // Slack response_url failures should not crash the worker process.
+  }
+};
+
+const safePostSlackApplyResponse = async (
+  input: Parameters<typeof postSlackApplyResponse>[0],
+): Promise<void> => {
+  try {
+    await postSlackApplyResponse(input);
+  } catch {
+    // Slack response_url failures should not crash the worker process.
+  }
 };
