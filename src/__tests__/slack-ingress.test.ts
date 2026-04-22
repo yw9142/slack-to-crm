@@ -203,4 +203,33 @@ describe('Worker handoff request shape', () => {
       }),
     );
   });
+
+  it('should include Slack bot token only when event replies need Web API posting', () => {
+    const request = buildWorkerHandoffRequest({
+      endpoint: 'process',
+      slack: {
+        channelId: 'C123',
+        messageTs: '1712345678.000100',
+        threadTs: '1712345678.000100',
+      },
+      slackAgentRequestId: 'request-123',
+      slackBotToken: 'xoxb-test-token',
+      text: '다우데이타 회사 찾아줘',
+      workerBaseUrl: 'https://worker.example',
+      workerSharedSecret: 'shared-secret',
+    });
+
+    expect(request.init.body).toBe(
+      JSON.stringify({
+        slackAgentRequestId: 'request-123',
+        text: '다우데이타 회사 찾아줘',
+        slackBotToken: 'xoxb-test-token',
+        slack: {
+          channelId: 'C123',
+          messageTs: '1712345678.000100',
+          threadTs: '1712345678.000100',
+        },
+      }),
+    );
+  });
 });

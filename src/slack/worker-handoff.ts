@@ -13,6 +13,7 @@ export type WorkerHandoffRequestInput = {
   workerPayload?: Record<string, unknown>;
   text?: string;
   responseUrl?: string;
+  slackBotToken?: string;
   slack?: Record<string, string | undefined>;
   context?: Record<string, unknown>;
   workerBaseUrl?: string;
@@ -33,6 +34,7 @@ export function buildWorkerHandoffRequest({
   workerPayload,
   text,
   responseUrl,
+  slackBotToken,
   slack,
   context,
   workerBaseUrl = process.env.WORKER_BASE_URL,
@@ -60,6 +62,7 @@ export function buildWorkerHandoffRequest({
           slackAgentRequestId,
           ...(text ? { text } : {}),
           ...(responseUrl ? { responseUrl } : {}),
+          ...(slackBotToken ? { slackBotToken } : {}),
           ...(slack ? { slack } : {}),
           ...(context ? { context } : {}),
         }

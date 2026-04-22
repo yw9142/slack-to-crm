@@ -87,6 +87,7 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
       userId: slackEvent.userId,
     },
     slackAgentRequestId,
+    slackBotToken: process.env.SLACK_BOT_TOKEN,
     text: normalizedText,
   });
 

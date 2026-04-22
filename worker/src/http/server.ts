@@ -73,6 +73,8 @@ export const handleHttpRequest = async (
 
     if (url.pathname === '/internal/slack-agent/process') {
       const parsedRequest = parseProcessRequest(body);
+      const slackBotToken =
+        readProcessSlackBotToken(body) ?? options.slackBotToken;
 
       if (parsedRequest.responseUrl) {
         runProcessInBackground({
@@ -83,11 +85,11 @@ export const handleHttpRequest = async (
         return;
       }
 
-      if (options.slackBotToken && parsedRequest.slack?.channelId) {
+      if (slackBotToken && parsedRequest.slack?.channelId) {
         runProcessInBackground({
           agentRunner: options.agentRunner,
           request: parsedRequest,
-          slackBotToken: options.slackBotToken,
+          slackBotToken,
         });
         writeJson(response, 202, { status: 'accepted' });
         return;
@@ -175,6 +177,14 @@ const parseProcessRequest = (body: unknown): SlackAgentProcessRequest => {
     text: readString(body, 'text') ?? readString(body, 'slackMessageText'),
     toolCalls: parseToolCalls(body.toolCalls),
   };
+};
+
+const readProcessSlackBotToken = (body: unknown): string | undefined => {
+  if (!isJsonRecord(body)) {
+    return undefined;
+  }
+
+  return readString(body, 'slackBotToken');
 };
 
 const parseApplyRequest = (body: unknown): SlackAgentApplyRequest => {
