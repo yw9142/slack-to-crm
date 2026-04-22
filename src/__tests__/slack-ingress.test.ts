@@ -182,6 +182,28 @@ describe('Slack route security', () => {
 });
 
 describe('Slack raw body reconstruction', () => {
+  it('should preserve raw bodies wrapped by Twenty routes', () => {
+    expect(
+      getRouteRawBody({
+        body: {
+          raw: 'token=abc&team_id=T123&text=find+acme',
+        },
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        pathParameters: {},
+        queryStringParameters: {},
+        isBase64Encoded: false,
+        requestContext: {
+          http: {
+            method: 'POST',
+            path: '/s/slack-to-crm/commands',
+          },
+        },
+      }),
+    ).toBe('token=abc&team_id=T123&text=find+acme');
+  });
+
   it('should reconstruct form encoded bodies parsed by Twenty routes', () => {
     expect(
       getRouteRawBody({

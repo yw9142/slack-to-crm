@@ -39,6 +39,12 @@ export function getJsonObjectArrayField(
 
 export function parseJsonObject(value: unknown): JsonObject {
   if (isJsonObject(value)) {
+    const rawValue = getRawBodyValue(value);
+
+    if (rawValue) {
+      return parseJsonObject(rawValue);
+    }
+
     return value;
   }
 
@@ -79,6 +85,14 @@ export function getRouteRawBody(event: RoutePayload<unknown>): string {
     return '';
   }
 
+  if (isJsonObject(event.body)) {
+    const rawValue = getRawBodyValue(event.body);
+
+    if (rawValue) {
+      return rawValue;
+    }
+  }
+
   if (isJsonObject(event.body) && isFormUrlEncodedRoute(event)) {
     return new URLSearchParams(
       Object.entries(event.body).flatMap(([key, value]) =>
@@ -107,6 +121,12 @@ export function parseFormBody(body: unknown): URLSearchParams {
     return new URLSearchParams();
   }
 
+  const rawValue = getRawBodyValue(body);
+
+  if (rawValue) {
+    return new URLSearchParams(rawValue);
+  }
+
   const searchParams = new URLSearchParams();
 
   Object.entries(body).forEach(([key, value]) => {
@@ -116,6 +136,12 @@ export function parseFormBody(body: unknown): URLSearchParams {
   });
 
   return searchParams;
+}
+
+function getRawBodyValue(body: JsonObject): string | undefined {
+  const rawValue = body.raw;
+
+  return typeof rawValue === 'string' ? rawValue : undefined;
 }
 
 export function formBodyToJsonObject(searchParams: URLSearchParams): JsonObject {
