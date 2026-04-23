@@ -77,6 +77,10 @@ export type SlackAgentApplyResponse = {
   draftId: string;
   toolName: 'execute_tool';
   result: unknown;
+  results?: Array<{
+    draftId: string;
+    result: unknown;
+  }>;
 };
 
 export const isJsonRecord = (value: unknown): value is JsonRecord =>

@@ -151,29 +151,58 @@ export class AgentRunner {
   public async apply(
     request: SlackAgentApplyRequest,
   ): Promise<SlackAgentApplyResponse> {
-    const draft =
-      request.draft ??
-      (await this.loadDraftFromApproval(request.slackAgentApprovalId));
+    const drafts = request.draft
+      ? [request.draft]
+      : await this.loadDraftsFromApproval(request.slackAgentApprovalId);
 
-    if (!draft) {
+    if (drafts.length === 0) {
       throw new Error('Approved apply request does not include a write draft');
     }
 
-    const applyResult = await this.policyGateway.applyApprovedDraft({
-      approvalId: request.approvalId ?? request.slackAgentApprovalId,
-      approvedBySlackUserId: request.approvedBySlackUserId ?? 'unknown-slack-user',
-      draft,
-    });
+    const applyResults = [];
+
+    for (const draft of drafts) {
+      applyResults.push(
+        await this.policyGateway.applyApprovedDraft({
+          approvalId: request.approvalId ?? request.slackAgentApprovalId,
+          approvedBySlackUserId:
+            request.approvedBySlackUserId ?? 'unknown-slack-user',
+          draft,
+        }),
+      );
+    }
 
     await this.persistApplyResult({
       approvalId: request.approvalId ?? request.slackAgentApprovalId,
-      applyResult: applyResult.result,
+      applyResult: {
+        results: applyResults.map((applyResult) => ({
+          draftId: applyResult.draftId,
+          result: applyResult.result,
+        })),
+      },
       request,
     });
+    const firstApplyResult = applyResults[0];
+
+    if (!firstApplyResult) {
+      throw new Error('Approved apply request did not produce a result');
+    }
 
     return {
-      draftId: applyResult.draftId,
-      result: applyResult.result,
+      draftId: firstApplyResult.draftId,
+      result:
+        applyResults.length === 1
+          ? firstApplyResult.result
+          : {
+              results: applyResults.map((applyResult) => ({
+                draftId: applyResult.draftId,
+                result: applyResult.result,
+              })),
+            },
+      results: applyResults.map((applyResult) => ({
+        draftId: applyResult.draftId,
+        result: applyResult.result,
+      })),
       status: 'applied',
       toolName: 'execute_tool',
     };
@@ -300,17 +329,17 @@ export class AgentRunner {
     const lastProcessedAt = new Date().toISOString();
 
     try {
-      for (const draft of writeDrafts) {
+      if (writeDrafts.length > 0) {
         const approvalResult = await this.policyGateway.callSystemWriteTool(
           'create_slack_agent_approval',
           {
-            actions: { drafts: [draft] },
+            actions: { drafts: writeDrafts },
             position: 'first',
             slackAgentRequestId: request.slackAgentRequestId,
             status: 'PENDING',
             summary: assistantMessage,
-            title: `Approval for ${draft.toolName}`,
-            workerPayload: { draft },
+            title: buildApprovalTitle(writeDrafts),
+            workerPayload: { drafts: writeDrafts },
           },
         );
         const approvalId = extractRecordId(approvalResult);
@@ -440,11 +469,11 @@ export class AgentRunner {
     }
   }
 
-  private async loadDraftFromApproval(
+  private async loadDraftsFromApproval(
     slackAgentApprovalId: string | undefined,
-  ): Promise<WriteDraft | null> {
+  ): Promise<WriteDraft[]> {
     if (!slackAgentApprovalId) {
-      return null;
+      return [];
     }
 
     const toolNames = [
@@ -457,17 +486,17 @@ export class AgentRunner {
         const result = await this.policyGateway.callReadTool(toolName, {
           id: slackAgentApprovalId,
         });
-        const draft = findWriteDraft(result);
+        const drafts = findWriteDrafts(result);
 
-        if (draft) {
-          return draft;
+        if (drafts.length > 0) {
+          return drafts;
         }
       } catch {
         // Try the next naming convention exposed by the MCP catalog.
       }
     }
 
-    return null;
+    return [];
   }
 }
 
@@ -649,18 +678,27 @@ const parseJsonText = (value: string): unknown => {
   }
 };
 
-const findWriteDraft = (value: unknown): WriteDraft | null => {
+const findWriteDrafts = (value: unknown): WriteDraft[] => {
   if (!isJsonRecord(value)) {
-    return null;
+    return [];
   }
 
   const directDraft = normalizeWriteDraft(value);
 
   if (directDraft) {
-    return directDraft;
+    return [directDraft];
+  }
+
+  const directDrafts = Array.isArray(value.drafts)
+    ? value.drafts.flatMap(normalizeWriteDraftCandidate)
+    : [];
+
+  if (directDrafts.length > 0) {
+    return directDrafts;
   }
 
   for (const candidateKey of [
+    'drafts',
     'draft',
     'workerPayload',
     'appliedResult',
@@ -670,10 +708,12 @@ const findWriteDraft = (value: unknown): WriteDraft | null => {
     'slackAgentApproval',
   ]) {
     const nestedValue = value[candidateKey];
-    const nestedDraft = findWriteDraft(nestedValue);
+    const nestedDrafts = Array.isArray(nestedValue)
+      ? nestedValue.flatMap(findWriteDrafts)
+      : findWriteDrafts(nestedValue);
 
-    if (nestedDraft) {
-      return nestedDraft;
+    if (nestedDrafts.length > 0) {
+      return nestedDrafts;
     }
   }
 
@@ -683,15 +723,25 @@ const findWriteDraft = (value: unknown): WriteDraft | null => {
         continue;
       }
 
-      const nestedDraft = findWriteDraft(parseJsonText(contentItem.text));
+      const nestedDrafts = findWriteDrafts(parseJsonText(contentItem.text));
 
-      if (nestedDraft) {
-        return nestedDraft;
+      if (nestedDrafts.length > 0) {
+        return nestedDrafts;
       }
     }
   }
 
-  return null;
+  return [];
+};
+
+const normalizeWriteDraftCandidate = (value: unknown): WriteDraft[] => {
+  if (!isJsonRecord(value)) {
+    return [];
+  }
+
+  const draft = normalizeWriteDraft(value);
+
+  return draft ? [draft] : [];
 };
 
 const normalizeWriteDraft = (value: JsonRecord): WriteDraft | null => {
@@ -749,6 +799,14 @@ const extractRecordId = (value: unknown): string | null => {
   }
 
   return null;
+};
+
+const buildApprovalTitle = (writeDrafts: WriteDraft[]): string => {
+  if (writeDrafts.length === 1) {
+    return `Approval for ${writeDrafts[0]?.toolName ?? 'CRM write'}`;
+  }
+
+  return `Approval for ${writeDrafts.length} CRM changes`;
 };
 
 const mapToolTraceStatus = (toolResult: ToolExecutionRecord): string => {

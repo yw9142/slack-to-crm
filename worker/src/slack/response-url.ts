@@ -164,7 +164,10 @@ export const postSlackApplyResponse = async (
 
   await postResponseUrl(input.request.responseUrl, {
     response_type: 'ephemeral',
-    text: 'CRM 변경을 적용했습니다.',
+    text:
+      Array.isArray(input.result.results) && input.result.results.length > 1
+        ? `CRM 변경 ${input.result.results.length}건을 적용했습니다.`
+        : 'CRM 변경을 적용했습니다.',
   });
 };
 

@@ -112,4 +112,51 @@ fs.writeFileSync(args[outputIndex + 1], '*CRM native MCP 응답*');
       await rm(tempDirectory, { force: true, recursive: true });
     }
   });
+
+  it('rejects approval-like answers when Codex did not create write drafts', async () => {
+    const tempDirectory = await mkdtemp(join(tmpdir(), 'fake-codex-'));
+    const fakeCodexPath = join(tempDirectory, 'fake-codex.cjs');
+    const invocationPath = join(tempDirectory, 'invocation.json');
+
+    await writeFile(
+      fakeCodexPath,
+      `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf('--output-last-message');
+const invocationPath = ${JSON.stringify(invocationPath)};
+const count = fs.existsSync(invocationPath) ? Number(fs.readFileSync(invocationPath, 'utf8')) + 1 : 1;
+fs.writeFileSync(invocationPath, String(count));
+fs.writeFileSync(args[outputIndex + 1], 'CRM 반영 초안입니다. 아직 실제 반영하지 않았습니다. 승인 시 반영될 변경입니다.');
+`,
+    );
+    await chmod(fakeCodexPath, 0o755);
+
+    const readMcpClient = new RecordingMcpClient();
+    const writeMcpClient = new RecordingMcpClient();
+    const policyGateway = new ToolPolicyGateway({
+      readMcpClient,
+      writeMcpClient,
+    });
+    const policyMcpGateway = new PolicyMcpGateway({ policyGateway });
+    const runner = new CodexNativeMcpAgentRunner({
+      codexBinary: fakeCodexPath,
+      policyGateway,
+      policyMcpBaseUrl: 'http://127.0.0.1:8787',
+      policyMcpGateway,
+      workingDirectory: tempDirectory,
+    });
+
+    try {
+      await expect(
+        runner.process({
+          slackAgentRequestId: 'request-1',
+          text: '미팅 결과 CRM에 반영해줘',
+        }),
+      ).rejects.toThrow('CRM 승인 초안 생성에 실패했습니다');
+      await expect(readFile(invocationPath, 'utf8')).resolves.toBe('2');
+    } finally {
+      await rm(tempDirectory, { force: true, recursive: true });
+    }
+  });
 });

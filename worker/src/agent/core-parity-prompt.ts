@@ -140,7 +140,8 @@ Approval required:
 - execute_tool for create_*, create_many_*, update_*, update_many_*, delete_* creates a Slack approval draft.
 - Do not say a create, update, or delete was applied unless the request is an approval apply result.
 - Before write drafts, verify target records or duplicate risk with read tools whenever possible.
-- For bulk writes, verify scope and summarize count/filter/risk before drafting.`;
+- For bulk writes, verify scope and summarize count/filter/risk before drafting.
+- If you are preparing an approval summary, you MUST first call execute_tool for every concrete write action that should be approved. Describing a draft in final text without captured write drafts is not allowed.`;
 
 const FINAL_ANSWER_RULES = `## Final Answer Rules
 
@@ -148,6 +149,7 @@ const FINAL_ANSWER_RULES = `## Final Answer Rules
 - Do not run shell commands, inspect local files, or use the local filesystem for CRM work.
 - The final answer must be Slack-ready Korean text.
 - If a write action is required, return an approval-ready summary and make clear that it is pending approval.
+- For write requests, the final answer is valid only after the policy MCP has returned approvalRequired/write draft results from execute_tool.
 - If some data could not be fetched after a reasonable retry, continue with available evidence and list the missing item under "확인 필요".`;
 
 const buildUserRuntimeContextSection = (runtime: JsonRecord): string =>
