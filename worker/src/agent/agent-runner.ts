@@ -179,6 +179,23 @@ export class AgentRunner {
     };
   }
 
+  public async recordProcessFailure(
+    request: SlackAgentProcessRequest,
+    errorMessage: string,
+  ): Promise<void> {
+    try {
+      await this.policyGateway.callSystemWriteTool('update_slack_agent_request', {
+        errorMessage: sanitizeWorkerErrorMessage(errorMessage),
+        id: request.slackAgentRequestId,
+        lastProcessedAt: new Date().toISOString(),
+        mode: 'ERROR',
+        status: 'FAILED',
+      });
+    } catch {
+      // Failure persistence is best effort; Slack still receives a safe error message.
+    }
+  }
+
   private async executeToolCalls(toolCalls: AgentToolCall[]): Promise<{
     toolResults: ToolExecutionRecord[];
     writeDrafts: WriteDraft[];
@@ -747,4 +764,20 @@ const normalizeJsonRecord = (value: unknown): JsonRecord => {
   }
 
   return { value };
+};
+
+const sanitizeWorkerErrorMessage = (errorMessage: string): string => {
+  if (errorMessage.includes('invalid_json_schema')) {
+    return 'Codex output schema was rejected by the model provider.';
+  }
+
+  if (errorMessage.toLowerCase().includes('timed out')) {
+    return 'Codex CLI timed out while processing the CRM request.';
+  }
+
+  if (errorMessage.length > 2_000) {
+    return `${errorMessage.slice(0, 2_000)}...`;
+  }
+
+  return errorMessage;
 };

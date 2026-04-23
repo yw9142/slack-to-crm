@@ -173,7 +173,7 @@ const buildCodexPrompt = (input: AgentAdapterInput): string =>
         toolCalls: [
           {
             name: 'get_tool_catalog | learn_tools | load_skills | execute_tool',
-            arguments: {},
+            argumentsJson: '{"toolName":"find_companies","arguments":{"limit":5}}',
             reason: '<why this tool is needed>',
           },
         ],
@@ -238,12 +238,30 @@ const normalizeToolCall = (value: unknown): AgentToolCall[] => {
 
   return [
     {
-      arguments: isJsonRecord(value.arguments) ? value.arguments : {},
+      arguments: normalizeToolArguments(value),
       id: typeof value.id === 'string' ? value.id : undefined,
       name: value.name,
       reason: typeof value.reason === 'string' ? value.reason : undefined,
     },
   ];
+};
+
+const normalizeToolArguments = (value: JsonRecord): JsonRecord => {
+  if (isJsonRecord(value.arguments)) {
+    return value.arguments;
+  }
+
+  if (typeof value.argumentsJson !== 'string') {
+    return {};
+  }
+
+  try {
+    const parsedArguments = JSON.parse(value.argumentsJson) as unknown;
+
+    return isJsonRecord(parsedArguments) ? parsedArguments : {};
+  } catch {
+    return {};
+  }
 };
 
 const CODEX_OUTPUT_SCHEMA = {
@@ -254,7 +272,7 @@ const CODEX_OUTPUT_SCHEMA = {
     assistantMessage: { type: 'string' },
     metadata: {
       type: 'object',
-      additionalProperties: true,
+      additionalProperties: false,
       properties: {
         mode: {
           type: 'string',
@@ -268,14 +286,10 @@ const CODEX_OUTPUT_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'arguments', 'reason'],
+        required: ['name', 'argumentsJson', 'reason'],
         properties: {
-          id: { type: 'string' },
           name: { type: 'string' },
-          arguments: {
-            type: 'object',
-            additionalProperties: true,
-          },
+          argumentsJson: { type: 'string' },
           reason: { type: 'string' },
         },
       },

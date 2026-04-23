@@ -337,19 +337,44 @@ const runProcessInBackground = ({
       return safePostSlackProcessResponse({ request, result });
     })
     .catch((error: unknown) =>
-      slackBotToken && !request.responseUrl
-        ? safePostSlackChannelProcessResponse({
-            errorMessage:
-              error instanceof Error ? error.message : 'Unknown worker error',
-            request,
-            slackBotToken,
-          })
-        : safePostSlackProcessResponse({
-            errorMessage:
-              error instanceof Error ? error.message : 'Unknown worker error',
-            request,
-          }),
+      handleProcessFailure({
+        agentRunner,
+        error,
+        request,
+        slackBotToken,
+      }),
     );
+};
+
+const handleProcessFailure = async ({
+  agentRunner,
+  error,
+  request,
+  slackBotToken,
+}: {
+  agentRunner: AgentRunner;
+  error: unknown;
+  request: SlackAgentProcessRequest;
+  slackBotToken?: string;
+}): Promise<void> => {
+  const errorMessage =
+    error instanceof Error ? error.message : 'Unknown worker error';
+
+  await agentRunner.recordProcessFailure(request, errorMessage);
+
+  if (slackBotToken && !request.responseUrl) {
+    await safePostSlackChannelProcessResponse({
+      errorMessage,
+      request,
+      slackBotToken,
+    });
+    return;
+  }
+
+  await safePostSlackProcessResponse({
+    errorMessage,
+    request,
+  });
 };
 
 const runApplyInBackground = ({
