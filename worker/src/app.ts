@@ -44,7 +44,9 @@ export const createWorkerApp = (options: CreateAgentRunnerOptions): WorkerApp =>
       agentRunner: new CodexNativeMcpAgentRunner({
         codexBinary: options.env.codexBinary,
         codexHome: options.env.codexHome,
+        qualityMode: options.env.agentQualityMode,
         model: options.env.codexModel,
+        reasoningEffort: options.env.codexReasoningEffort,
         policyGateway,
         policyMcpBaseUrl: `http://127.0.0.1:${options.env.port}`,
         policyMcpGateway,
@@ -62,6 +64,7 @@ export const createWorkerApp = (options: CreateAgentRunnerOptions): WorkerApp =>
           codexBinary: options.env.codexBinary,
           codexHome: options.env.codexHome,
           model: options.env.codexModel,
+          reasoningEffort: options.env.codexReasoningEffort,
           timeoutMs: options.env.codexTimeoutMs,
           workingDirectory: options.env.codexWorkingDirectory,
         });
@@ -105,6 +108,7 @@ export const createLegacyAgentRunner = (
           codexBinary: options.env.codexBinary,
           codexHome: options.env.codexHome,
           model: options.env.codexModel,
+          reasoningEffort: options.env.codexReasoningEffort,
           timeoutMs: options.env.codexTimeoutMs,
           workingDirectory: options.env.codexWorkingDirectory,
         });

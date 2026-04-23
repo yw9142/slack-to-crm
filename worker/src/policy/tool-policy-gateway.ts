@@ -15,6 +15,7 @@ const META_TOOL_NAMES = new Set([
   'get_tool_catalog',
   'learn_tools',
   'load_skills',
+  'search_help_center',
 ]);
 const EXECUTE_TOOL_NAME = 'execute_tool';
 
@@ -140,6 +141,8 @@ export class ToolPolicyGateway {
   public async applyApprovedDraft(
     input: ApplyApprovedDraftInput,
   ): Promise<ApplyApprovedDraftResult> {
+    this.validateApprovedDraft(input.draft);
+
     const result = await this.executeTwentyTool(
       this.writeMcpClient,
       input.draft.toolName,
@@ -188,6 +191,36 @@ export class ToolPolicyGateway {
     };
   }
 
+  private validateApprovedDraft(draft: WriteDraft): void {
+    if (draft.status !== 'pending_approval') {
+      throw new Error(`Cannot apply draft ${draft.id}: draft is not pending`);
+    }
+
+    if (classifyToolName(draft.toolName) !== 'write') {
+      throw new Error(
+        `Cannot apply draft ${draft.id}: ${draft.toolName} is not a write tool`,
+      );
+    }
+
+    if (
+      draft.toolName.startsWith('update_many_') &&
+      !isJsonRecord(draft.arguments.filter)
+    ) {
+      throw new Error(
+        `Cannot apply draft ${draft.id}: bulk update requires a filter`,
+      );
+    }
+
+    if (
+      draft.toolName.startsWith('create_many_') &&
+      !Array.isArray(draft.arguments.records)
+    ) {
+      throw new Error(
+        `Cannot apply draft ${draft.id}: bulk create requires records`,
+      );
+    }
+  }
+
   private async executeCoreStyleToolCall(
     toolCall: AgentToolCall,
   ): Promise<ToolPolicyGatewayResult> {
@@ -215,6 +248,17 @@ export class ToolPolicyGateway {
         toolName,
         toolArguments,
       );
+
+      return {
+        classification,
+        kind: 'tool_result',
+        result,
+        toolCall,
+      };
+    }
+
+    if (classification === 'meta') {
+      const result = await this.readMcpClient.callTool(toolName, toolArguments);
 
       return {
         classification,

@@ -17,6 +17,24 @@ class RecordingMcpClient implements TwentyMcpToolClient {
   ): Promise<McpToolCallResult> {
     this.calls.push({ arguments: toolArguments, name });
 
+    if (
+      name === 'execute_tool' &&
+      toolArguments.toolName === 'find_opportunities' &&
+      JSON.stringify(toolArguments.arguments).includes('"desc"')
+    ) {
+      return {
+        content: [
+          {
+            text: JSON.stringify({
+              error: 'Invalid enum value "desc" for orderBy direction',
+            }),
+            type: 'text',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'get_tool_catalog') {
       return {
         content: [
@@ -35,6 +53,12 @@ class RecordingMcpClient implements TwentyMcpToolClient {
                   {
                     description: 'Search blocklists',
                     name: 'find_blocklists',
+                  },
+                ],
+                DASHBOARD: [
+                  {
+                    description: 'List dashboards',
+                    name: 'list_dashboards',
                   },
                 ],
               },
@@ -182,7 +206,7 @@ describe('PolicyMcpGateway', () => {
     });
   });
 
-  it('defaults and compacts tool catalog calls for CRM requests', async () => {
+  it('defaults tool catalog categories by request profile without over-compacting small catalogs', async () => {
     const { policyMcpGateway, readMcpClient } = createGateway();
     const session = policyMcpGateway.createSession({
       request: { slackAgentRequestId: 'request-1', text: '영업 딜 조회' },
@@ -223,10 +247,98 @@ describe('PolicyMcpGateway', () => {
         DATABASE_CRUD: [
           expect.objectContaining({ name: 'find_companies' }),
           expect.objectContaining({ name: 'find_opportunities' }),
+          expect.objectContaining({ name: 'find_blocklists' }),
         ],
       },
     });
-    expect(JSON.stringify(parsedCatalog)).not.toContain('find_blocklists');
+  });
+
+  it('uses dashboard catalog categories for dashboard/reporting requests', async () => {
+    const { policyMcpGateway, readMcpClient } = createGateway();
+    const session = policyMcpGateway.createSession({
+      request: { slackAgentRequestId: 'request-1', text: '영업 대시보드 만들어줘' },
+    });
+    const response = createMockResponse();
+
+    await policyMcpGateway.handleHttpRequest(
+      createMockRequest({
+        authorization: `Bearer ${session.token}`,
+        body: {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: {
+            arguments: {},
+            name: 'get_tool_catalog',
+          },
+        },
+      }),
+      response,
+      new URL(`http://localhost/mcp/${session.id}`),
+    );
+
+    expect(readMcpClient.calls).toEqual([
+      {
+        arguments: {
+          categories: [
+            'DATABASE_CRUD',
+            'DASHBOARD',
+            'VIEW',
+            'VIEW_FIELD',
+            'METADATA',
+          ],
+        },
+        name: 'get_tool_catalog',
+      },
+    ]);
+  });
+
+  it('wraps MCP tool errors with retry-friendly repair context', async () => {
+    const { policyMcpGateway } = createGateway();
+    const session = policyMcpGateway.createSession({
+      request: { slackAgentRequestId: 'request-1', text: '금액 높은 딜 조회' },
+    });
+    const response = createMockResponse();
+
+    await policyMcpGateway.handleHttpRequest(
+      createMockRequest({
+        authorization: `Bearer ${session.token}`,
+        body: {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: {
+            arguments: {
+              arguments: { orderBy: [{ amountMicros: 'desc' }] },
+              toolName: 'find_opportunities',
+            },
+            name: 'execute_tool',
+          },
+        },
+      }),
+      response,
+      new URL(`http://localhost/mcp/${session.id}`),
+    );
+
+    const body = JSON.parse(response.body) as JsonRecord;
+    const result = body.result as McpToolCallResult;
+    const text = String(result.content?.[0]?.text);
+    const parsedResult = JSON.parse(text) as JsonRecord;
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(parsedResult)).toContain('DescNullsLast');
+
+    const sessionResult = policyMcpGateway.getSessionResult(session.id);
+
+    expect(sessionResult.toolResults).toEqual([
+      expect.objectContaining({
+        errorHint: expect.stringContaining('DescNullsLast'),
+        errorMessage: 'Invalid enum value "desc" for orderBy direction',
+        kind: 'read',
+        retryCount: 1,
+        toolName: 'find_opportunities',
+      }),
+    ]);
   });
 });
 

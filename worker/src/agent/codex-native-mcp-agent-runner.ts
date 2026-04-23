@@ -9,6 +9,7 @@ import {
   buildNativeMcpPrompt,
   buildRuntimeContext,
 } from './native-mcp-prompt';
+import { selectCoreParityProfile } from './core-parity-profiles';
 import type { PolicyMcpGateway } from '../mcp/policy-mcp-gateway';
 import type { ToolPolicyGateway } from '../policy/tool-policy-gateway';
 import type {
@@ -26,6 +27,8 @@ export type CodexNativeMcpAgentRunnerOptions = {
   policyMcpBaseUrl: string;
   policyMcpGateway: PolicyMcpGateway;
   policyGateway: ToolPolicyGateway;
+  qualityMode?: 'core-parity' | 'legacy';
+  reasoningEffort?: string;
   timeoutMs?: number;
   workingDirectory?: string;
 };
@@ -38,6 +41,8 @@ export class CodexNativeMcpAgentRunner implements AgentService {
   private readonly policyMcpBaseUrl: string;
   private readonly policyMcpGateway: PolicyMcpGateway;
   private readonly policyGateway: ToolPolicyGateway;
+  private readonly qualityMode: 'core-parity' | 'legacy';
+  private readonly reasoningEffort?: string;
   private readonly timeoutMs: number;
   private readonly workingDirectory: string;
 
@@ -51,6 +56,8 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     this.policyMcpBaseUrl = options.policyMcpBaseUrl.replace(/\/$/, '');
     this.policyMcpGateway = options.policyMcpGateway;
     this.policyGateway = options.policyGateway;
+    this.qualityMode = options.qualityMode ?? 'core-parity';
+    this.reasoningEffort = options.reasoningEffort;
     this.timeoutMs = options.timeoutMs ?? 180_000;
     this.workingDirectory = options.workingDirectory ?? process.cwd();
   }
@@ -59,10 +66,12 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     request: SlackAgentProcessRequest,
   ): Promise<SlackAgentProcessResponse> {
     const policySession = this.policyMcpGateway.createSession({ request });
+    const promptProfile = selectCoreParityProfile(request.text);
     const metadata: JsonRecord = {
       agentEngine: 'native-mcp',
+      agentQualityMode: this.qualityMode,
       policySessionId: policySession.id,
-      promptProfile: selectPromptProfile(request.text),
+      promptProfile,
     };
 
     try {
@@ -72,6 +81,7 @@ export class CodexNativeMcpAgentRunner implements AgentService {
         )}`,
         policyToken: policySession.token,
         prompt: buildNativeMcpPrompt({
+          profile: promptProfile,
           request,
           runtime: buildRuntimeContext(),
         }),
@@ -213,6 +223,15 @@ export class CodexNativeMcpAgentRunner implements AgentService {
       args.splice(1, 0, '--model', this.model);
     }
 
+    if (this.reasoningEffort) {
+      args.splice(
+        args.length - 1,
+        0,
+        '-c',
+        `model_reasoning_effort="${this.reasoningEffort}"`,
+      );
+    }
+
     return new Promise((resolve, reject) => {
       const child = spawn(this.codexBinary, args, {
         env: buildCodexProcessEnv({
@@ -261,21 +280,6 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     });
   }
 }
-
-const selectPromptProfile = (text: string | undefined): string => {
-  const normalizedText = text?.toLowerCase() ?? '';
-
-  return [
-    '일일 영업',
-    '영업 가이드',
-    '영업가이드',
-    '오늘 영업',
-    'daily sales',
-    'sales guide',
-  ].some((keyword) => normalizedText.includes(keyword.toLowerCase()))
-    ? 'daily-sales-guide'
-    : 'general-crm';
-};
 
 const buildCodexProcessEnv = ({
   codexHome,

@@ -1,9 +1,11 @@
 export type WorkerEnv = {
   agentEngine: 'native-mcp' | 'legacy-json-loop' | 'deterministic';
+  agentQualityMode: 'core-parity' | 'legacy';
   codexAdapterMode: 'cli' | 'deterministic';
   codexBinary: string;
   codexHome?: string;
   codexModel?: string;
+  codexReasoningEffort: string;
   codexTimeoutMs: number;
   codexWorkingDirectory: string;
   port: number;
@@ -53,11 +55,14 @@ export const loadWorkerEnv = (
   source: EnvSource = process.env,
 ): WorkerEnv => ({
   agentEngine: parseAgentEngine(source),
+  agentQualityMode:
+    source.AGENT_QUALITY_MODE === 'legacy' ? 'legacy' : 'core-parity',
   codexAdapterMode:
     source.CODEX_AGENT_MODE === 'deterministic' ? 'deterministic' : 'cli',
   codexBinary: source.CODEX_BINARY ?? 'codex',
   codexHome: source.CODEX_HOME,
-  codexModel: source.CODEX_MODEL,
+  codexModel: source.CODEX_MODEL ?? 'gpt-5.4',
+  codexReasoningEffort: source.CODEX_REASONING_EFFORT ?? 'high',
   codexTimeoutMs: parsePositiveInteger(source.CODEX_TIMEOUT_MS, 900_000),
   codexWorkingDirectory: source.CODEX_WORKDIR ?? process.cwd(),
   port: parsePort(source.WORKER_PORT ?? source.PORT),

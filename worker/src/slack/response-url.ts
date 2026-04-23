@@ -6,6 +6,7 @@ import type {
   SlackAgentProcessResponse,
   WriteDraft,
 } from '../types';
+import { formatSlackRichAnswer } from './slack-rich-formatter';
 
 type SlackBlock = JsonRecord;
 type SlackFetch = typeof fetch;
@@ -67,7 +68,7 @@ export const postSlackProcessResponse = async (
 
   await postResponseUrl(input.request.responseUrl, {
     response_type: 'ephemeral',
-    text: result.assistantMessage,
+    text: formatSlackRichAnswer(result.assistantMessage),
   });
 };
 
@@ -107,7 +108,9 @@ export const postSlackChannelProcessResponse = async (
     return;
   }
 
-  for (const text of splitSlackText(result.assistantMessage)) {
+  const formattedAssistantMessage = formatSlackRichAnswer(result.assistantMessage);
+
+  for (const text of splitSlackText(formattedAssistantMessage)) {
     await postSlackMessage({
       fetchImplementation: input.fetchImplementation,
       payload: buildThreadPayload(input.request, {
@@ -264,7 +267,7 @@ const isJsonRecord = (value: unknown): value is JsonRecord =>
 const buildApprovalText = (result: SlackAgentProcessResponse): string =>
   [
     '*CRM 변경 승인 필요*',
-    result.assistantMessage,
+    formatSlackRichAnswer(result.assistantMessage),
     ...result.writeDrafts.map(formatWriteDraft),
   ].join('\n');
 
