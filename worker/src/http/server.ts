@@ -407,13 +407,16 @@ const runApplyInBackground = ({
     .then((result: SlackAgentApplyResponse) =>
       safePostSlackApplyResponse({ request, result }),
     )
-    .catch((error: unknown) =>
-      safePostSlackApplyResponse({
-        errorMessage:
-          error instanceof Error ? error.message : 'Unknown worker error',
+    .catch(async (error: unknown) => {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown worker error';
+
+      await agentRunner.recordApplyFailure(request, errorMessage);
+      await safePostSlackApplyResponse({
+        errorMessage,
         request,
-      }),
-    );
+      });
+    });
 };
 
 const safePostSlackProcessResponse = async (

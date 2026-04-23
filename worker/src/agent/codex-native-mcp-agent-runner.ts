@@ -230,6 +230,13 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     return this.persistence.recordProcessFailure(request, errorMessage);
   }
 
+  public recordApplyFailure(
+    request: SlackAgentApplyRequest,
+    errorMessage: string,
+  ): Promise<void> {
+    return this.persistence.recordApplyFailure(request, errorMessage);
+  }
+
   private async recordProcessStarted(
     request: SlackAgentProcessRequest,
   ): Promise<void> {

@@ -146,6 +146,30 @@ export class AgentResultPersistence {
     }
   }
 
+  public async recordApplyFailure(
+    request: SlackAgentApplyRequest,
+    errorMessage: string,
+  ): Promise<void> {
+    try {
+      if (request.slackAgentApprovalId ?? request.approvalId) {
+        await this.policyGateway.callSystemWriteTool(
+          'update_slack_agent_approval',
+          {
+            appliedResult: {
+              error: sanitizeWorkerErrorMessage(errorMessage),
+            },
+            decidedAt: new Date().toISOString(),
+            id: request.slackAgentApprovalId ?? request.approvalId,
+            slackApproverUserId: request.approvedBySlackUserId,
+            status: 'APPLY_FAILED',
+          },
+        );
+      }
+    } catch {
+      // Failure persistence is best effort; Slack still receives a safe error message.
+    }
+  }
+
   public async loadDraftsFromApproval(
     slackAgentApprovalId: string | undefined,
   ): Promise<WriteDraft[]> {
