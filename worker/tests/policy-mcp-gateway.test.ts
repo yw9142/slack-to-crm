@@ -17,6 +17,34 @@ class RecordingMcpClient implements TwentyMcpToolClient {
   ): Promise<McpToolCallResult> {
     this.calls.push({ arguments: toolArguments, name });
 
+    if (name === 'get_tool_catalog') {
+      return {
+        content: [
+          {
+            text: JSON.stringify({
+              catalog: {
+                DATABASE_CRUD: [
+                  {
+                    description: 'Search companies',
+                    name: 'find_companies',
+                  },
+                  {
+                    description: 'Search opportunities',
+                    name: 'find_opportunities',
+                  },
+                  {
+                    description: 'Search blocklists',
+                    name: 'find_blocklists',
+                  },
+                ],
+              },
+            }),
+            type: 'text',
+          },
+        ],
+      };
+    }
+
     return {
       content: [{ text: `${name} result`, type: 'text' }],
     };
@@ -152,6 +180,53 @@ describe('PolicyMcpGateway', () => {
         ],
       },
     });
+  });
+
+  it('defaults and compacts tool catalog calls for CRM requests', async () => {
+    const { policyMcpGateway, readMcpClient } = createGateway();
+    const session = policyMcpGateway.createSession({
+      request: { slackAgentRequestId: 'request-1', text: '영업 딜 조회' },
+    });
+    const response = createMockResponse();
+
+    await policyMcpGateway.handleHttpRequest(
+      createMockRequest({
+        authorization: `Bearer ${session.token}`,
+        body: {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: {
+            arguments: {},
+            name: 'get_tool_catalog',
+          },
+        },
+      }),
+      response,
+      new URL(`http://localhost/mcp/${session.id}`),
+    );
+
+    expect(readMcpClient.calls).toEqual([
+      {
+        arguments: { categories: ['DATABASE_CRUD'] },
+        name: 'get_tool_catalog',
+      },
+    ]);
+
+    const body = JSON.parse(response.body) as JsonRecord;
+    const result = body.result as McpToolCallResult;
+    const text = String(result.content?.[0]?.text);
+    const parsedCatalog = JSON.parse(text) as JsonRecord;
+
+    expect(parsedCatalog).toMatchObject({
+      catalog: {
+        DATABASE_CRUD: [
+          expect.objectContaining({ name: 'find_companies' }),
+          expect.objectContaining({ name: 'find_opportunities' }),
+        ],
+      },
+    });
+    expect(JSON.stringify(parsedCatalog)).not.toContain('find_blocklists');
   });
 });
 

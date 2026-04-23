@@ -58,7 +58,7 @@ export const loadWorkerEnv = (
   codexBinary: source.CODEX_BINARY ?? 'codex',
   codexHome: source.CODEX_HOME,
   codexModel: source.CODEX_MODEL,
-  codexTimeoutMs: parsePositiveInteger(source.CODEX_TIMEOUT_MS, 120_000),
+  codexTimeoutMs: parsePositiveInteger(source.CODEX_TIMEOUT_MS, 300_000),
   codexWorkingDirectory: source.CODEX_WORKDIR ?? process.cwd(),
   port: parsePort(source.WORKER_PORT ?? source.PORT),
   sharedSecret:

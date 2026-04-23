@@ -227,11 +227,15 @@ export class PolicyMcpGateway {
     toolArguments: JsonRecord,
   ): Promise<McpToolCallResult> {
     const startedAt = this.now();
+    const normalizedToolArguments = withPolicyToolDefaults(
+      toolName,
+      toolArguments,
+    );
     const toolCall: AgentToolCall = {
-      arguments: toolArguments,
+      arguments: normalizedToolArguments,
       id: randomUUID(),
       name: toolName,
-      reason: readReason(toolArguments),
+      reason: readReason(normalizedToolArguments),
     };
     const policyResult = await this.policyGateway.executeToolCall(toolCall);
     const finishedAt = this.now();
@@ -243,15 +247,23 @@ export class PolicyMcpGateway {
     };
 
     if (policyResult.kind === 'tool_result') {
+      const result =
+        getEffectiveToolName(toolCall) === 'get_tool_catalog'
+          ? compactToolCatalogForRequest(
+              policyResult.result,
+              session.request.text,
+            )
+          : policyResult.result;
+
       session.toolResults.push({
         ...traceMetadata,
         kind: policyResult.classification,
-        result: policyResult.result,
+        result,
         toolCallId: toolCall.id,
         toolName: getEffectiveToolName(toolCall),
       });
 
-      return policyResult.result;
+      return result;
     }
 
     if (policyResult.kind === 'write_draft') {
@@ -292,7 +304,7 @@ export class PolicyMcpGateway {
         {
           text: JSON.stringify({
             error: policyResult.message,
-            input: normalizeJsonRecord(toolArguments),
+            input: normalizeJsonRecord(normalizedToolArguments),
           }),
           type: 'text',
         },
@@ -391,6 +403,143 @@ const readReason = (toolArguments: JsonRecord): string | undefined => {
   const reason = toolArguments.reason;
 
   return typeof reason === 'string' ? reason : undefined;
+};
+
+const withPolicyToolDefaults = (
+  toolName: string,
+  toolArguments: JsonRecord,
+): JsonRecord => {
+  if (toolName !== 'get_tool_catalog') {
+    return toolArguments;
+  }
+
+  const categories = toolArguments.categories;
+
+  if (Array.isArray(categories) && categories.length > 0) {
+    return toolArguments;
+  }
+
+  return {
+    ...toolArguments,
+    categories: ['DATABASE_CRUD'],
+  };
+};
+
+const compactToolCatalogForRequest = (
+  value: McpToolCallResult,
+  requestText: string | undefined,
+): McpToolCallResult => {
+  const payload = unwrapMcpTextJson(value);
+
+  if (!isJsonRecord(payload) || !isJsonRecord(payload.catalog)) {
+    return value;
+  }
+
+  const wantedTerms = buildRelevantToolTerms(requestText);
+  const compactCatalog: JsonRecord = {};
+  let originalCount = 0;
+  let selectedCount = 0;
+
+  for (const [category, entries] of Object.entries(payload.catalog)) {
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+
+    const selectedEntries = entries.flatMap((entry) => {
+      originalCount += 1;
+
+      if (!isJsonRecord(entry) || typeof entry.name !== 'string') {
+        return [];
+      }
+
+      const description =
+        typeof entry.description === 'string' ? entry.description : '';
+      const searchableText = `${entry.name} ${description}`.toLowerCase();
+
+      if (!wantedTerms.some((term) => searchableText.includes(term))) {
+        return [];
+      }
+
+      return [{ description, name: entry.name }];
+    });
+
+    if (selectedEntries.length > 0) {
+      selectedCount += selectedEntries.length;
+      compactCatalog[category] = selectedEntries;
+    }
+  }
+
+  return {
+    content: [
+      {
+        text: JSON.stringify({
+          catalog: compactCatalog,
+          message: `Filtered CRM tool catalog to ${selectedCount} relevant tool(s) from ${originalCount}. Use learn_tools before executing any listed CRM read/write tool.`,
+        }),
+        type: 'text',
+      },
+    ],
+  };
+};
+
+const unwrapMcpTextJson = (value: unknown): unknown => {
+  if (!isJsonRecord(value) || !Array.isArray(value.content)) {
+    return value;
+  }
+
+  for (const contentItem of value.content) {
+    if (!isJsonRecord(contentItem) || typeof contentItem.text !== 'string') {
+      continue;
+    }
+
+    const parsedValue = parseJsonText(contentItem.text);
+
+    if (parsedValue !== null) {
+      return parsedValue;
+    }
+  }
+
+  return value;
+};
+
+const buildRelevantToolTerms = (requestText: string | undefined): string[] => {
+  const normalizedText = requestText?.toLowerCase() ?? '';
+  const terms = new Set<string>([
+    'company',
+    'companies',
+    'opportunit',
+    'person',
+    'people',
+    'task',
+    'note',
+  ]);
+
+  const addTerms = (patterns: string[], toolTerms: string[]) => {
+    if (patterns.some((pattern) => normalizedText.includes(pattern))) {
+      toolTerms.forEach((term) => terms.add(term));
+    }
+  };
+
+  addTerms(['회사', '기업', '고객사', 'account', 'vendor', '벤더'], [
+    'company',
+    'companies',
+  ]);
+  addTerms(['연락처', '담당자', '사람', 'contact'], ['person', 'people']);
+  addTerms(['영업', '기회', '딜', 'deal', 'pipeline', '파이프라인'], [
+    'opportunit',
+  ]);
+  addTerms(['할 일', '할일', '태스크', '업무', 'task'], ['task']);
+  addTerms(['노트', '메모', '활동', 'activity', 'note'], ['note', 'activity']);
+
+  return Array.from(terms);
+};
+
+const parseJsonText = (value: string): unknown => {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 };
 
 const readJsonRpcId = (value: unknown): JsonRpcId | undefined => {
