@@ -73,6 +73,46 @@ export default defineObject({
       icon: 'IconTool',
     },
     {
+      universalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.policySessionId,
+      name: 'policySessionId',
+      type: FieldType.TEXT,
+      label: 'Policy session ID',
+      icon: 'IconFingerprint',
+      isNullable: true,
+      defaultValue: null,
+    },
+    {
+      universalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.promptProfile,
+      name: 'promptProfile',
+      type: FieldType.TEXT,
+      label: 'Prompt profile',
+      icon: 'IconTextCaption',
+      isNullable: true,
+      defaultValue: null,
+    },
+    {
+      universalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.retryCount,
+      name: 'retryCount',
+      type: FieldType.NUMBER,
+      label: 'Retry count',
+      icon: 'IconClockBolt',
+      isNullable: true,
+      defaultValue: null,
+    },
+    {
+      universalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.errorHint,
+      name: 'errorHint',
+      type: FieldType.TEXT,
+      label: 'Error hint',
+      icon: 'IconAlertTriangle',
+      isNullable: true,
+      defaultValue: null,
+    },
+    {
       universalIdentifier: SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.input,
       name: 'input',
       type: FieldType.RAW_JSON,

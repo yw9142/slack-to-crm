@@ -191,6 +191,7 @@ export class AgentResultPersistence {
     for (const toolResult of toolResults) {
       await this.createToolTrace({
         durationMs: toolResult.durationMs,
+        errorHint: toolResult.errorHint,
         errorMessage: toolResult.errorMessage,
         finishedAt: toolResult.finishedAt,
         input: toolResult.input,
@@ -201,6 +202,9 @@ export class AgentResultPersistence {
         ),
         slackAgentRequestId: request.slackAgentRequestId,
         slackAgentThreadId,
+        policySessionId: toolResult.policySessionId,
+        promptProfile: toolResult.promptProfile,
+        retryCount: toolResult.retryCount,
         startedAt: toolResult.startedAt,
         status: mapToolTraceStatus(toolResult),
         toolName: toolResult.toolName,

@@ -47,6 +47,9 @@ if (outputIndex < 0) process.exit(11);
 if (!args.includes('--ignore-user-config')) process.exit(12);
 if (!args.some((arg) => arg.includes('mcp_servers.slack_crm_policy.url'))) process.exit(13);
 if (!args.some((arg) => arg.includes('default_tools_approval_mode="approve"'))) process.exit(16);
+const modelIndex = args.indexOf('--model');
+if (modelIndex < 0 || args[modelIndex + 1] !== 'gpt-5.4') process.exit(17);
+if (!args.some((arg) => arg === 'model_reasoning_effort="high"')) process.exit(18);
 if (process.env.TWENTY_MCP_READ_TOKEN) process.exit(14);
 if (!process.env.SLACK_CRM_POLICY_MCP_TOKEN) process.exit(15);
 fs.writeFileSync(${JSON.stringify(invocationPath)}, JSON.stringify({ args, token: process.env.SLACK_CRM_POLICY_MCP_TOKEN }));
@@ -66,9 +69,11 @@ fs.writeFileSync(args[outputIndex + 1], '*CRM native MCP 응답*');
     const policyMcpGateway = new PolicyMcpGateway({ policyGateway });
     const runner = new CodexNativeMcpAgentRunner({
       codexBinary: fakeCodexPath,
+      model: 'gpt-5.4',
       policyGateway,
       policyMcpBaseUrl: 'http://127.0.0.1:8787',
       policyMcpGateway,
+      reasoningEffort: 'high',
       workingDirectory: tempDirectory,
     });
 

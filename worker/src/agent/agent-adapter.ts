@@ -39,6 +39,7 @@ export type CodexCliAgentAdapterOptions = {
   codexBinary?: string;
   codexHome?: string;
   model?: string;
+  reasoningEffort?: string;
   timeoutMs?: number;
   workingDirectory?: string;
 };
@@ -47,6 +48,7 @@ export class CodexCliAgentAdapter implements AgentAdapter {
   private readonly codexBinary: string;
   private readonly codexHome?: string;
   private readonly model?: string;
+  private readonly reasoningEffort?: string;
   private readonly timeoutMs: number;
   private readonly workingDirectory: string;
 
@@ -54,6 +56,7 @@ export class CodexCliAgentAdapter implements AgentAdapter {
     this.codexBinary = options.codexBinary ?? 'codex';
     this.codexHome = options.codexHome;
     this.model = options.model;
+    this.reasoningEffort = options.reasoningEffort;
     this.timeoutMs = options.timeoutMs ?? 120_000;
     this.workingDirectory = options.workingDirectory ?? process.cwd();
   }
@@ -109,6 +112,15 @@ export class CodexCliAgentAdapter implements AgentAdapter {
 
     if (this.model) {
       args.splice(1, 0, '--model', this.model);
+    }
+
+    if (this.reasoningEffort) {
+      args.splice(
+        args.length - 1,
+        0,
+        '-c',
+        `model_reasoning_effort="${this.reasoningEffort}"`,
+      );
     }
 
     return new Promise((resolve, reject) => {

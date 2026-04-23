@@ -97,5 +97,37 @@ export default defineView({
       position: 8,
       isVisible: false,
     },
+    {
+      universalIdentifier:
+        SLACK_AGENT_VIEW_FIELD_UNIVERSAL_IDENTIFIERS.toolTracePolicySessionId,
+      fieldMetadataUniversalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.policySessionId,
+      position: 9,
+      size: 260,
+    },
+    {
+      universalIdentifier:
+        SLACK_AGENT_VIEW_FIELD_UNIVERSAL_IDENTIFIERS.toolTracePromptProfile,
+      fieldMetadataUniversalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.promptProfile,
+      position: 10,
+      size: 220,
+    },
+    {
+      universalIdentifier:
+        SLACK_AGENT_VIEW_FIELD_UNIVERSAL_IDENTIFIERS.toolTraceRetryCount,
+      fieldMetadataUniversalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.retryCount,
+      position: 11,
+      size: 130,
+    },
+    {
+      universalIdentifier:
+        SLACK_AGENT_VIEW_FIELD_UNIVERSAL_IDENTIFIERS.toolTraceErrorHint,
+      fieldMetadataUniversalIdentifier:
+        SLACK_AGENT_TOOL_TRACE_FIELD_UNIVERSAL_IDENTIFIERS.errorHint,
+      position: 12,
+      size: 280,
+    },
   ]),
 });

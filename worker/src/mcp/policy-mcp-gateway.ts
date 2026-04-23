@@ -2,6 +2,11 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 
 import type { McpToolCallResult } from './types';
+import {
+  getCatalogCategoriesForProfile,
+  selectCoreParityProfile,
+  type AgentPromptProfile,
+} from '../agent/core-parity-profiles';
 import type {
   AgentToolCall,
   JsonRecord,
@@ -21,6 +26,8 @@ type JsonRpcId = string | number | null;
 
 type PolicyMcpSession = {
   createdAt: Date;
+  id: string;
+  profile: AgentPromptProfile;
   request: SlackAgentProcessRequest;
   token: string;
   toolResults: ToolExecutionRecord[];
@@ -59,6 +66,8 @@ export class PolicyMcpGateway {
 
     this.sessions.set(id, {
       createdAt: this.now(),
+      id,
+      profile: selectCoreParityProfile(input.request.text),
       request: input.request,
       token,
       toolResults: [],
@@ -230,6 +239,7 @@ export class PolicyMcpGateway {
     const normalizedToolArguments = withPolicyToolDefaults(
       toolName,
       toolArguments,
+      session.profile,
     );
     const toolCall: AgentToolCall = {
       arguments: normalizedToolArguments,
@@ -239,31 +249,58 @@ export class PolicyMcpGateway {
     };
     const policyResult = await this.policyGateway.executeToolCall(toolCall);
     const finishedAt = this.now();
+    const effectiveToolName = getEffectiveToolName(toolCall);
+    const effectiveToolArguments = getEffectiveToolArguments(toolCall);
     const traceMetadata = {
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       finishedAt: finishedAt.toISOString(),
-      input: getEffectiveToolArguments(toolCall),
+      input: effectiveToolArguments,
+      policySessionId: session.id,
+      promptProfile: session.profile,
       startedAt: startedAt.toISOString(),
     };
 
     if (policyResult.kind === 'tool_result') {
       const result =
-        getEffectiveToolName(toolCall) === 'get_tool_catalog'
-          ? compactToolCatalogForRequest(
+        effectiveToolName === 'get_tool_catalog'
+          ? shapeToolCatalogForRequest(
               policyResult.result,
               session.request.text,
+              session.profile,
             )
           : policyResult.result;
+      const repair = buildRepairContext({
+        arguments: effectiveToolArguments,
+        result,
+        toolName: effectiveToolName,
+      });
+      const previousFailureCount = session.toolResults.filter(
+        (toolResult) =>
+          toolResult.toolName === effectiveToolName && toolResult.errorMessage,
+      ).length;
+      const finalResult = repair
+        ? withRepairContext(result, {
+            ...repair,
+            retryCount: previousFailureCount + 1,
+          })
+        : result;
 
       session.toolResults.push({
         ...traceMetadata,
+        ...(repair
+          ? {
+              errorHint: repair.errorHint,
+              errorMessage: repair.errorMessage,
+              retryCount: previousFailureCount + 1,
+            }
+          : {}),
         kind: policyResult.classification,
-        result,
+        result: finalResult,
         toolCallId: toolCall.id,
-        toolName: getEffectiveToolName(toolCall),
+        toolName: effectiveToolName,
       });
 
-      return result;
+      return finalResult;
     }
 
     if (policyResult.kind === 'write_draft') {
@@ -293,10 +330,13 @@ export class PolicyMcpGateway {
 
     session.toolResults.push({
       ...traceMetadata,
+      errorHint:
+        'Use get_tool_catalog to discover allowed policy tools, then learn_tools before execute_tool.',
+      errorMessage: policyResult.message,
       kind: 'denied',
       message: policyResult.message,
       toolCallId: toolCall.id,
-      toolName: getEffectiveToolName(toolCall),
+      toolName: effectiveToolName,
     });
 
     return {
@@ -315,7 +355,7 @@ export class PolicyMcpGateway {
 }
 
 const POLICY_MCP_INSTRUCTIONS =
-  'Slack-to-CRM policy MCP server. Follow this workflow: (1) get_tool_catalog to discover tools, (2) learn_tools to get input schemas, (3) execute_tool to run them. Never guess tool names. For comparative/grouped CRM analytics, use group_by tools. Writes are never applied here: create/update/delete actions become Slack approval drafts.';
+  'Slack-to-CRM policy MCP server. Follow this workflow: (1) get_tool_catalog to discover tools, (2) learn_tools to get input schemas, (3) execute_tool to run them. Never guess tool names. For comparative/grouped CRM analytics, use group_by tools. Use search_help_center for Twenty usage/help. Writes are never applied here: create/update/delete actions become Slack approval drafts.';
 
 const objectSchema = {
   additionalProperties: true,
@@ -397,6 +437,22 @@ const POLICY_MCP_TOOLS = [
     },
     name: 'execute_tool',
   },
+  {
+    description:
+      'Search the Twenty documentation and help center for setup, usage, and troubleshooting guidance.',
+    inputSchema: {
+      additionalProperties: true,
+      properties: {
+        query: {
+          description: 'Help center search query.',
+          type: 'string',
+        },
+      },
+      required: ['query'],
+      type: 'object',
+    },
+    name: 'search_help_center',
+  },
 ] as const;
 
 const readReason = (toolArguments: JsonRecord): string | undefined => {
@@ -408,6 +464,7 @@ const readReason = (toolArguments: JsonRecord): string | undefined => {
 const withPolicyToolDefaults = (
   toolName: string,
   toolArguments: JsonRecord,
+  profile: AgentPromptProfile,
 ): JsonRecord => {
   if (toolName !== 'get_tool_catalog') {
     return toolArguments;
@@ -421,13 +478,17 @@ const withPolicyToolDefaults = (
 
   return {
     ...toolArguments,
-    categories: ['DATABASE_CRUD'],
+    categories: getCatalogCategoriesForProfile(profile),
   };
 };
 
-const compactToolCatalogForRequest = (
+const MAX_UNCOMPACTED_CATALOG_TOOLS = 120;
+const MAX_COMPACTED_CATALOG_TOOLS = 80;
+
+const shapeToolCatalogForRequest = (
   value: McpToolCallResult,
   requestText: string | undefined,
+  profile: AgentPromptProfile,
 ): McpToolCallResult => {
   const payload = unwrapMcpTextJson(value);
 
@@ -436,7 +497,11 @@ const compactToolCatalogForRequest = (
   }
 
   const wantedTerms = buildRelevantToolTerms(requestText);
+  const preferredCategories = new Set<string>(
+    getCatalogCategoriesForProfile(profile),
+  );
   const compactCatalog: JsonRecord = {};
+  const fallbackEntries: Array<{ category: string; entry: JsonRecord }> = [];
   let originalCount = 0;
   let selectedCount = 0;
 
@@ -455,8 +520,15 @@ const compactToolCatalogForRequest = (
       const description =
         typeof entry.description === 'string' ? entry.description : '';
       const searchableText = `${entry.name} ${description}`.toLowerCase();
+      const categoryBoost = preferredCategories.has(category);
 
       if (!wantedTerms.some((term) => searchableText.includes(term))) {
+        if (categoryBoost && fallbackEntries.length < MAX_COMPACTED_CATALOG_TOOLS) {
+          fallbackEntries.push({
+            category,
+            entry: { description, name: entry.name },
+          });
+        }
         return [];
       }
 
@@ -469,17 +541,164 @@ const compactToolCatalogForRequest = (
     }
   }
 
+  if (originalCount <= MAX_UNCOMPACTED_CATALOG_TOOLS) {
+    return value;
+  }
+
+  for (const { category, entry } of fallbackEntries) {
+    if (selectedCount >= MAX_COMPACTED_CATALOG_TOOLS) {
+      break;
+    }
+
+    const entries = Array.isArray(compactCatalog[category])
+      ? (compactCatalog[category] as JsonRecord[])
+      : [];
+    const alreadyIncluded = entries.some(
+      (candidate) => candidate.name === entry.name,
+    );
+
+    if (alreadyIncluded) {
+      continue;
+    }
+
+    entries.push(entry);
+    compactCatalog[category] = entries;
+    selectedCount += 1;
+  }
+
   return {
     content: [
       {
         text: JSON.stringify({
           catalog: compactCatalog,
-          message: `Filtered CRM tool catalog to ${selectedCount} relevant tool(s) from ${originalCount}. Use learn_tools before executing any listed CRM read/write tool.`,
+          message: `Compacted CRM tool catalog to ${selectedCount} likely relevant tool(s) from ${originalCount} for profile ${profile}. If needed, call get_tool_catalog again with broader or different categories. Use learn_tools before executing any listed CRM read/write tool.`,
         }),
         type: 'text',
       },
     ],
   };
+};
+
+type RepairContext = {
+  errorHint: string;
+  errorMessage: string;
+};
+
+const buildRepairContext = ({
+  arguments: toolArguments,
+  result,
+  toolName,
+}: {
+  arguments: JsonRecord;
+  result: McpToolCallResult;
+  toolName: string;
+}): RepairContext | null => {
+  if (!isJsonRecord(result) || result.isError !== true) {
+    return null;
+  }
+
+  const errorMessage = extractMcpErrorMessage(result);
+  const hints = [
+    `Tool ${toolName} returned an error. Inspect the learned schema and retry with corrected arguments when possible.`,
+    buildSpecificRepairHint(toolName, toolArguments, errorMessage),
+  ].filter((hint): hint is string => typeof hint === 'string');
+
+  return {
+    errorHint: hints.join(' '),
+    errorMessage,
+  };
+};
+
+const withRepairContext = (
+  result: McpToolCallResult,
+  repair: RepairContext & { retryCount: number },
+): McpToolCallResult => {
+  const payload = unwrapMcpTextJson(result);
+
+  return {
+    ...result,
+    content: [
+      {
+        text: JSON.stringify({
+          originalResult: payload,
+          repair,
+        }),
+        type: 'text',
+      },
+    ],
+    isError: true,
+  };
+};
+
+const extractMcpErrorMessage = (result: McpToolCallResult): string => {
+  if (typeof result.error === 'string') {
+    return result.error;
+  }
+
+  if (Array.isArray(result.content)) {
+    for (const item of result.content) {
+      if (!isJsonRecord(item) || typeof item.text !== 'string') {
+        continue;
+      }
+
+      const parsedValue = parseJsonText(item.text);
+
+      if (isJsonRecord(parsedValue)) {
+        for (const key of ['error', 'message', 'errorMessage']) {
+          const value = parsedValue[key];
+
+          if (typeof value === 'string') {
+            return value;
+          }
+        }
+      }
+
+      if (item.text.trim().length > 0) {
+        return item.text.trim();
+      }
+    }
+  }
+
+  return 'MCP tool returned an error.';
+};
+
+const buildSpecificRepairHint = (
+  toolName: string,
+  toolArguments: JsonRecord,
+  errorMessage: string,
+): string | null => {
+  const searchableText = `${toolName} ${errorMessage} ${JSON.stringify(
+    toolArguments,
+  )}`.toLowerCase();
+
+  if (searchableText.includes('orderby') || searchableText.includes('sort')) {
+    return 'For orderBy, use exact Twenty directions: AscNullsFirst, AscNullsLast, DescNullsFirst, DescNullsLast.';
+  }
+
+  if (toolName.startsWith('group_by_') || searchableText.includes('groupby')) {
+    return 'For group_by tools, use schema-supported groupBy fields plus aggregateOperation and aggregateFieldName only when the learned schema allows them.';
+  }
+
+  if (
+    searchableText.includes('date') ||
+    searchableText.includes('time') ||
+    searchableText.includes('operator')
+  ) {
+    return 'For date filters, use only operators returned by learn_tools, such as eq, gt, gte, lt, lte, in, is, or the exact schema-specific operator names.';
+  }
+
+  if (
+    searchableText.includes('not found') ||
+    searchableText.includes('unknown tool')
+  ) {
+    return 'Do not guess tool names. Call get_tool_catalog again, then learn_tools for exact tool names and schemas.';
+  }
+
+  if (searchableText.includes('undefined') && searchableText.includes('length')) {
+    return 'A tool or skill returned an internal shape error. Continue with get_tool_catalog and learn_tools if possible, then use available CRM evidence instead of fabricating data.';
+  }
+
+  return null;
 };
 
 const unwrapMcpTextJson = (value: unknown): unknown => {

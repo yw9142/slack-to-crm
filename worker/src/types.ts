@@ -38,8 +38,12 @@ export type WriteDraft = {
 export type ToolExecutionRecord = {
   durationMs?: number;
   errorMessage?: string;
+  errorHint?: string;
   finishedAt?: string;
   input?: JsonRecord;
+  policySessionId?: string;
+  promptProfile?: string;
+  retryCount?: number;
   toolCallId?: string;
   toolName: string;
   kind: 'read' | 'meta' | 'write_draft' | 'denied' | 'applied';
