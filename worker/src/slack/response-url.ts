@@ -107,13 +107,40 @@ export const postSlackChannelProcessResponse = async (
     return;
   }
 
+  for (const text of splitSlackText(result.assistantMessage)) {
+    await postSlackMessage({
+      fetchImplementation: input.fetchImplementation,
+      payload: buildThreadPayload(input.request, {
+        channel: channelId,
+        text,
+      }),
+      slackBotToken: input.slackBotToken,
+    });
+  }
+};
+
+export const postSlackProcessingMessage = async ({
+  fetchImplementation,
+  request,
+  slackBotToken,
+}: {
+  fetchImplementation?: SlackFetch;
+  request: SlackAgentProcessRequest;
+  slackBotToken: string;
+}): Promise<void> => {
+  const channelId = request.slack?.channelId;
+
+  if (!channelId) {
+    return;
+  }
+
   await postSlackMessage({
-    fetchImplementation: input.fetchImplementation,
-    payload: buildThreadPayload(input.request, {
+    fetchImplementation,
+    payload: buildThreadPayload(request, {
       channel: channelId,
-      text: result.assistantMessage,
+      text: ':hourglass_flowing_sand: CRM 데이터를 확인하고 답변을 준비하고 있습니다.',
     }),
-    slackBotToken: input.slackBotToken,
+    slackBotToken,
   });
 };
 
@@ -201,6 +228,34 @@ const postResponseUrl = async (
   if (!response.ok) {
     throw new Error(`Slack response_url returned HTTP ${response.status}`);
   }
+};
+
+const splitSlackText = (value: string): string[] => {
+  const maxLength = 32_000;
+
+  if (value.length <= maxLength) {
+    return [value];
+  }
+
+  const chunks: string[] = [];
+  let remainingValue = value;
+
+  while (remainingValue.length > maxLength) {
+    const splitIndex = Math.max(
+      remainingValue.lastIndexOf('\n\n', maxLength),
+      remainingValue.lastIndexOf('\n', maxLength),
+      maxLength,
+    );
+
+    chunks.push(remainingValue.slice(0, splitIndex).trim());
+    remainingValue = remainingValue.slice(splitIndex).trim();
+  }
+
+  if (remainingValue.length > 0) {
+    chunks.push(remainingValue);
+  }
+
+  return chunks;
 };
 
 const isJsonRecord = (value: unknown): value is JsonRecord =>

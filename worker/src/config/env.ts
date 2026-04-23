@@ -1,4 +1,5 @@
 export type WorkerEnv = {
+  agentEngine: 'native-mcp' | 'legacy-json-loop' | 'deterministic';
   codexAdapterMode: 'cli' | 'deterministic';
   codexBinary: string;
   codexHome?: string;
@@ -51,6 +52,7 @@ const parsePositiveInteger = (
 export const loadWorkerEnv = (
   source: EnvSource = process.env,
 ): WorkerEnv => ({
+  agentEngine: parseAgentEngine(source),
   codexAdapterMode:
     source.CODEX_AGENT_MODE === 'deterministic' ? 'deterministic' : 'cli',
   codexBinary: source.CODEX_BINARY ?? 'codex',
@@ -67,3 +69,21 @@ export const loadWorkerEnv = (
   twentyMcpReadToken: readRequiredEnv(source, 'TWENTY_MCP_READ_TOKEN'),
   twentyMcpWriteToken: readRequiredEnv(source, 'TWENTY_MCP_WRITE_TOKEN'),
 });
+
+const parseAgentEngine = (
+  source: EnvSource,
+): WorkerEnv['agentEngine'] => {
+  if (source.CODEX_AGENT_MODE === 'deterministic') {
+    return 'deterministic';
+  }
+
+  if (source.AGENT_ENGINE === 'legacy-json-loop') {
+    return 'legacy-json-loop';
+  }
+
+  if (source.AGENT_ENGINE === 'deterministic') {
+    return 'deterministic';
+  }
+
+  return 'native-mcp';
+};

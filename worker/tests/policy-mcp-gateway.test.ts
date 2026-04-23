@@ -1,0 +1,213 @@
+import { EventEmitter } from 'node:events';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
+import { describe, expect, it } from 'vitest';
+
+import { PolicyMcpGateway } from '../src/mcp/policy-mcp-gateway';
+import { ToolPolicyGateway } from '../src/policy/tool-policy-gateway';
+import type { McpToolCallResult, TwentyMcpToolClient } from '../src/mcp/types';
+import type { JsonRecord } from '../src/types';
+
+class RecordingMcpClient implements TwentyMcpToolClient {
+  public readonly calls: Array<{ arguments: JsonRecord; name: string }> = [];
+
+  public async callTool(
+    name: string,
+    toolArguments: JsonRecord = {},
+  ): Promise<McpToolCallResult> {
+    this.calls.push({ arguments: toolArguments, name });
+
+    return {
+      content: [{ text: `${name} result`, type: 'text' }],
+    };
+  }
+}
+
+describe('PolicyMcpGateway', () => {
+  it('rejects unauthenticated session requests', async () => {
+    const gateway = createGateway().policyMcpGateway;
+    const session = gateway.createSession({
+      request: { slackAgentRequestId: 'request-1', text: '회사 조회' },
+    });
+    const response = createMockResponse();
+
+    await gateway.handleHttpRequest(
+      createMockRequest({
+        body: {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'tools/list',
+          params: {},
+        },
+      }),
+      response,
+      new URL(`http://localhost/mcp/${session.id}`),
+    );
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('proxies read execute_tool calls and records traces', async () => {
+    const { policyMcpGateway, readMcpClient, writeMcpClient } = createGateway();
+    const session = policyMcpGateway.createSession({
+      request: { slackAgentRequestId: 'request-1', text: '회사 조회' },
+    });
+    const response = createMockResponse();
+
+    await policyMcpGateway.handleHttpRequest(
+      createMockRequest({
+        authorization: `Bearer ${session.token}`,
+        body: {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: {
+            arguments: {
+              arguments: { limit: 3 },
+              toolName: 'find_companies',
+            },
+            name: 'execute_tool',
+          },
+        },
+      }),
+      response,
+      new URL(`http://localhost/mcp/${session.id}`),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      id: 1,
+      jsonrpc: '2.0',
+      result: {
+        content: [{ text: 'execute_tool result', type: 'text' }],
+      },
+    });
+    expect(readMcpClient.calls).toEqual([
+      {
+        arguments: {
+          arguments: { limit: 3 },
+          toolName: 'find_companies',
+        },
+        name: 'execute_tool',
+      },
+    ]);
+    expect(writeMcpClient.calls).toHaveLength(0);
+
+    const sessionResult = policyMcpGateway.getSessionResult(session.id);
+
+    expect(sessionResult.toolResults).toEqual([
+      expect.objectContaining({
+        input: { limit: 3 },
+        kind: 'read',
+        toolName: 'find_companies',
+      }),
+    ]);
+  });
+
+  it('turns write execute_tool calls into approval drafts', async () => {
+    const { policyMcpGateway, readMcpClient, writeMcpClient } = createGateway();
+    const session = policyMcpGateway.createSession({
+      request: { slackAgentRequestId: 'request-1', text: '회사 생성' },
+    });
+    const response = createMockResponse();
+
+    await policyMcpGateway.handleHttpRequest(
+      createMockRequest({
+        authorization: `Bearer ${session.token}`,
+        body: {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: {
+            arguments: {
+              arguments: { name: '다우데이타' },
+              toolName: 'create_company',
+            },
+            name: 'execute_tool',
+          },
+        },
+      }),
+      response,
+      new URL(`http://localhost/mcp/${session.id}`),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(readMcpClient.calls).toHaveLength(0);
+    expect(writeMcpClient.calls).toHaveLength(0);
+
+    const sessionResult = policyMcpGateway.getSessionResult(session.id);
+
+    expect(sessionResult.writeDrafts).toEqual([
+      expect.objectContaining({
+        arguments: { name: '다우데이타' },
+        toolName: 'create_company',
+      }),
+    ]);
+    expect(JSON.parse(response.body)).toMatchObject({
+      result: {
+        content: [
+          {
+            type: 'text',
+          },
+        ],
+      },
+    });
+  });
+});
+
+const createGateway = () => {
+  const readMcpClient = new RecordingMcpClient();
+  const writeMcpClient = new RecordingMcpClient();
+  const toolPolicyGateway = new ToolPolicyGateway({
+    createDraftId: () => 'draft-1',
+    now: () => new Date('2026-04-23T00:00:00.000Z'),
+    readMcpClient,
+    writeMcpClient,
+  });
+  const policyMcpGateway = new PolicyMcpGateway({
+    now: () => new Date('2026-04-23T00:00:00.000Z'),
+    policyGateway: toolPolicyGateway,
+  });
+
+  return { policyMcpGateway, readMcpClient, writeMcpClient };
+};
+
+const createMockRequest = ({
+  authorization,
+  body,
+}: {
+  authorization?: string;
+  body: JsonRecord;
+}): IncomingMessage => {
+  const request = new EventEmitter() as IncomingMessage;
+
+  request.headers = authorization ? { authorization } : {};
+
+  queueMicrotask(() => {
+    request.emit('data', Buffer.from(JSON.stringify(body)));
+    request.emit('end');
+  });
+
+  return request;
+};
+
+const createMockResponse = (): ServerResponse & {
+  body: string;
+  statusCode: number;
+} => {
+  const response = new EventEmitter() as ServerResponse & {
+    body: string;
+    statusCode: number;
+  };
+
+  response.body = '';
+  response.statusCode = 200;
+  response.setHeader = () => response;
+  response.end = (chunk?: unknown) => {
+    response.body += chunk ? String(chunk) : '';
+
+    return response;
+  };
+
+  return response;
+};

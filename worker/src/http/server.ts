@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
-import type { AgentRunner } from '../agent/agent-runner';
+import type { AgentService } from '../agent/agent-service';
+import type { PolicyMcpGateway } from '../mcp/policy-mcp-gateway';
 import type {
   AgentToolCall,
   JsonRecord,
@@ -8,7 +9,6 @@ import type {
   SlackAgentContext,
   SlackAgentProcessRequest,
   SlackAgentApplyResponse,
-  SlackAgentProcessResponse,
   WriteDraft,
 } from '../types';
 import { isJsonRecord } from '../types';
@@ -17,15 +17,17 @@ import {
   postSlackChannelProcessResponse,
   postSlackApplyResponse,
   postSlackProcessResponse,
+  postSlackProcessingMessage,
 } from '../slack/response-url';
 
 const DEFAULT_MAX_BODY_BYTES = 1_000_000;
 
 export type WorkerHttpServerOptions = {
-  agentRunner: AgentRunner;
+  agentRunner: AgentService;
   sharedSecret: string;
   slackBotToken?: string;
   maxBodyBytes?: number;
+  policyMcpGateway?: PolicyMcpGateway;
 };
 
 class BadRequestError extends Error {
@@ -50,6 +52,16 @@ export const handleHttpRequest = async (
 
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    if (url.pathname.startsWith('/mcp/')) {
+      if (!options.policyMcpGateway) {
+        writeJson(response, 404, { error: 'MCP gateway not configured' });
+        return;
+      }
+
+      await options.policyMcpGateway.handleHttpRequest(request, response, url);
       return;
     }
 
@@ -319,13 +331,20 @@ const runProcessInBackground = ({
   request,
   slackBotToken,
 }: {
-  agentRunner: AgentRunner;
+  agentRunner: AgentService;
   request: SlackAgentProcessRequest;
   slackBotToken?: string;
 }): void => {
-  void agentRunner
-    .process(request)
-    .then((result: SlackAgentProcessResponse) => {
+  void (async () => {
+    if (slackBotToken && !request.responseUrl) {
+      await safePostSlackProcessingMessage({
+        request,
+        slackBotToken,
+      });
+    }
+
+    const result = await agentRunner.process(request);
+
       if (slackBotToken && !request.responseUrl) {
         return safePostSlackChannelProcessResponse({
           request,
@@ -335,8 +354,7 @@ const runProcessInBackground = ({
       }
 
       return safePostSlackProcessResponse({ request, result });
-    })
-    .catch((error: unknown) =>
+  })().catch((error: unknown) =>
       handleProcessFailure({
         agentRunner,
         error,
@@ -352,7 +370,7 @@ const handleProcessFailure = async ({
   request,
   slackBotToken,
 }: {
-  agentRunner: AgentRunner;
+  agentRunner: AgentService;
   error: unknown;
   request: SlackAgentProcessRequest;
   slackBotToken?: string;
@@ -381,7 +399,7 @@ const runApplyInBackground = ({
   agentRunner,
   request,
 }: {
-  agentRunner: AgentRunner;
+  agentRunner: AgentService;
   request: SlackAgentApplyRequest;
 }): void => {
   void agentRunner
@@ -415,6 +433,16 @@ const safePostSlackChannelProcessResponse = async (
     await postSlackChannelProcessResponse(input);
   } catch {
     // Slack Web API failures should not crash the worker process.
+  }
+};
+
+const safePostSlackProcessingMessage = async (
+  input: Parameters<typeof postSlackProcessingMessage>[0],
+): Promise<void> => {
+  try {
+    await postSlackProcessingMessage(input);
+  } catch {
+    // A progress message is helpful but not required for processing.
   }
 };
 

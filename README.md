@@ -14,11 +14,13 @@ architecture as a thin Slack ingress/audit app plus a companion MCP worker.
   - Does not define CRM `search-*`, `create-record`, `update-record`, or `delete-record` logic-function tools.
 - `worker/` is the companion agent service.
   - Uses the Twenty `/mcp` JSON-RPC endpoint.
-  - Runs `get_tool_catalog`, `load_skills`, read tools, and write draft interception through `ToolPolicyGateway`.
+  - Runs Codex CLI with native MCP tools so ChatGPT/Codex subscription access can be used.
+  - Exposes only a session-scoped policy MCP gateway to Codex, never the direct Twenty MCP token.
+  - Runs `get_tool_catalog`, `learn_tools`, `load_skills`, read tools, and write draft interception through `ToolPolicyGateway`.
   - Sends read/meta tools through the read MCP token.
   - Turns create/update/delete tool calls into Slack approval drafts until approval.
   - Applies approved drafts only through `execute_tool` with the write MCP token.
-  - Uses the Codex CLI adapter by default, with `CODEX_AGENT_MODE=deterministic` available for tests.
+  - Uses `AGENT_ENGINE=native-mcp` by default. Use `AGENT_ENGINE=legacy-json-loop` for rollback.
 
 ## Official Twenty Docs
 
@@ -51,11 +53,13 @@ WORKER_SHARED_SECRET=
 TWENTY_MCP_URL=https://your-twenty.example.com/mcp
 TWENTY_MCP_READ_TOKEN=
 TWENTY_MCP_WRITE_TOKEN=
+AGENT_ENGINE=native-mcp
 CODEX_AGENT_MODE=cli
 CODEX_BINARY=codex
 CODEX_MODEL=
 CODEX_HOME=
 CODEX_WORKDIR=
+CODEX_TIMEOUT_MS=180000
 ```
 
 ## Development
@@ -93,12 +97,12 @@ TWENTY_API_URL=http://localhost:2020 TWENTY_API_KEY=... yarn test:integration
 
 Configure Slack to call the deployed Twenty App route paths:
 
-- Events API request URL: `https://<twenty-host>/s/slack/events`
-- Slash command request URL: `https://<twenty-host>/s/slack/commands`
-- Interactivity request URL: `https://<twenty-host>/s/slack/interactivity`
+- Events API request URL: `https://<twenty-host>/s/slack-to-crm/events`
+- Slash command request URL: `https://<twenty-host>/s/slack-to-crm/commands`
+- Interactivity request URL: `https://<twenty-host>/s/slack-to-crm/interactivity`
 
 If a public proxy is used, point Slack at the proxy and route the same paths to
-the Twenty `/s/slack/*` endpoints.
+the Twenty `/s/slack-to-crm/*` endpoints.
 
 ## Safety Model
 
@@ -106,4 +110,5 @@ the Twenty `/s/slack/*` endpoints.
 - Creates, updates, and deletes are captured as `WriteDraft` objects.
 - Slack approval is required for every write, including creates.
 - The write token is only used in the worker apply path.
+- Codex subprocesses receive only a session-scoped policy MCP bearer token, not `TWENTY_MCP_*` secrets.
 - Tool traces are modeled separately so MCP catalog/schema-based execution can be audited.
