@@ -4,6 +4,7 @@ import type {
   SlackAgentProcessRequest,
   ToolExecutionRecord,
   WriteDraft,
+  WriteDraftLinkTarget,
 } from '../types';
 import type { ToolPolicyGateway } from '../policy/tool-policy-gateway';
 import {
@@ -344,6 +345,8 @@ const normalizeWriteDraft = (value: JsonRecord): WriteDraft | null => {
     return null;
   }
 
+  const linkTargets = readLinkTargets(value.linkTargets);
+
   return {
     approvalPolicy: 'slack_user_approval_required',
     arguments: value.arguments,
@@ -352,10 +355,41 @@ const normalizeWriteDraft = (value: JsonRecord): WriteDraft | null => {
         ? value.createdAt
         : new Date().toISOString(),
     id: value.id,
+    ...(linkTargets.length > 0 ? { linkTargets } : {}),
     reason: typeof value.reason === 'string' ? value.reason : undefined,
     status: 'pending_approval',
     toolName: value.toolName,
   };
+};
+
+const readLinkTargets = (value: unknown): WriteDraftLinkTarget[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (
+      !isJsonRecord(item) ||
+      typeof item.targetFieldName !== 'string' ||
+      typeof item.targetRecordId !== 'string'
+    ) {
+      return [];
+    }
+
+    const position = item.position;
+
+    return [
+      {
+        ...(position === 'first' ||
+        position === 'last' ||
+        typeof position === 'number'
+          ? { position }
+          : {}),
+        targetFieldName: item.targetFieldName,
+        targetRecordId: item.targetRecordId,
+      },
+    ];
+  });
 };
 
 const extractRecordId = (value: unknown): string | null => {

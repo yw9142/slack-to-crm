@@ -24,6 +24,50 @@ class RecordingMcpClient implements TwentyMcpToolClient {
       name,
     });
 
+    if (
+      name === 'execute_tool' &&
+      toolArguments.toolName === 'create_note'
+    ) {
+      return {
+        content: [
+          {
+            text: JSON.stringify({
+              recordReferences: [
+                {
+                  displayName: '미팅 노트',
+                  objectNameSingular: 'note',
+                  recordId: '11111111-1111-4111-8111-111111111111',
+                },
+              ],
+              result: {
+                id: '11111111-1111-4111-8111-111111111111',
+              },
+            }),
+            type: 'text',
+          },
+        ],
+      };
+    }
+
+    if (
+      name === 'execute_tool' &&
+      toolArguments.toolName === 'create_many_tasks'
+    ) {
+      return {
+        content: [
+          {
+            text: JSON.stringify({
+              result: [
+                { id: '22222222-2222-4222-8222-222222222222' },
+                { id: '33333333-3333-4333-8333-333333333333' },
+              ],
+            }),
+            type: 'text',
+          },
+        ],
+      };
+    }
+
     return {
       content: [
         {
@@ -197,6 +241,40 @@ describe('ToolPolicyGateway', () => {
     expect(writeMcpClient.calls).toHaveLength(0);
   });
 
+  it('moves inline note/task target fields into draft link target metadata', async () => {
+    const { gateway } = createGateway();
+
+    const result = await gateway.executeToolCall({
+      arguments: {
+        body: '고객 미팅 노트',
+        targetOpportunity: 'opportunity-1',
+        title: '미팅 노트',
+      },
+      name: 'create_note',
+      reason: 'Create a CRM note linked to the opportunity',
+    });
+
+    expect(result.kind).toBe('write_draft');
+
+    if (result.kind !== 'write_draft') {
+      throw new Error('Expected write draft result');
+    }
+
+    expect(result.draft).toMatchObject({
+      arguments: {
+        body: '고객 미팅 노트',
+        title: '미팅 노트',
+      },
+      linkTargets: [
+        {
+          targetFieldName: 'targetOpportunity',
+          targetRecordId: 'opportunity-1',
+        },
+      ],
+      toolName: 'create_note',
+    });
+  });
+
   it('uses the write bearer token and execute_tool for approved drafts', async () => {
     const fetchCalls: Array<{
       body: JsonRecord;
@@ -287,6 +365,122 @@ describe('ToolPolicyGateway', () => {
         name: 'Grace Hopper',
       },
       toolName: 'update_person',
+    });
+  });
+
+  it('creates note target records after approved note drafts with link targets', async () => {
+    const { gateway, writeMcpClient } = createGateway();
+    const draft: WriteDraft = {
+      approvalPolicy: 'slack_user_approval_required',
+      arguments: {
+        body: '보안심의 미팅 내용',
+        title: '미팅 노트',
+      },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      id: 'draft-note',
+      linkTargets: [
+        {
+          targetFieldName: 'targetOpportunity',
+          targetRecordId: 'opportunity-1',
+        },
+        {
+          targetFieldName: 'targetPerson',
+          targetRecordId: 'person-1',
+        },
+      ],
+      status: 'pending_approval',
+      toolName: 'create_note',
+    };
+
+    const results = await gateway.applyApprovedDraftWithRelations({
+      approvalId: 'approval-1',
+      approvedBySlackUserId: 'U123',
+      draft,
+    });
+
+    expect(results).toHaveLength(2);
+    expect(writeMcpClient.calls).toEqual([
+      {
+        arguments: {
+          arguments: {
+            body: '보안심의 미팅 내용',
+            title: '미팅 노트',
+          },
+          toolName: 'create_note',
+        },
+        name: 'execute_tool',
+      },
+      {
+        arguments: {
+          arguments: {
+            records: [
+              {
+                noteId: '11111111-1111-4111-8111-111111111111',
+                position: 'first',
+                targetOpportunityId: 'opportunity-1',
+              },
+              {
+                noteId: '11111111-1111-4111-8111-111111111111',
+                position: 'first',
+                targetPersonId: 'person-1',
+              },
+            ],
+          },
+          toolName: 'create_many_note_targets',
+        },
+        name: 'execute_tool',
+      },
+    ]);
+  });
+
+  it('creates task target records for every approved created task', async () => {
+    const { gateway, writeMcpClient } = createGateway();
+    const draft: WriteDraft = {
+      approvalPolicy: 'slack_user_approval_required',
+      arguments: {
+        records: [
+          { title: '보완자료 발송' },
+          { title: '후속 미팅 예약' },
+        ],
+      },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      id: 'draft-task',
+      linkTargets: [
+        {
+          targetFieldName: 'targetOpportunity',
+          targetRecordId: 'opportunity-1',
+        },
+      ],
+      status: 'pending_approval',
+      toolName: 'create_many_tasks',
+    };
+
+    const results = await gateway.applyApprovedDraftWithRelations({
+      approvalId: 'approval-1',
+      approvedBySlackUserId: 'U123',
+      draft,
+    });
+
+    expect(results).toHaveLength(2);
+    expect(writeMcpClient.calls[1]).toEqual({
+      arguments: {
+        arguments: {
+          records: [
+            {
+              position: 'first',
+              targetOpportunityId: 'opportunity-1',
+              taskId: '22222222-2222-4222-8222-222222222222',
+            },
+            {
+              position: 'first',
+              targetOpportunityId: 'opportunity-1',
+              taskId: '33333333-3333-4333-8333-333333333333',
+            },
+          ],
+        },
+        toolName: 'create_many_task_targets',
+      },
+      name: 'execute_tool',
     });
   });
 });

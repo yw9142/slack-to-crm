@@ -23,7 +23,7 @@ type PostProcessResponseInput =
       errorMessage: string;
     };
 
-type PostApplyResponseInput =
+type PostApplyResponseInput = (
   | {
       request: SlackAgentApplyRequest;
       result: SlackAgentApplyResponse;
@@ -33,7 +33,11 @@ type PostApplyResponseInput =
       request: SlackAgentApplyRequest;
       result?: never;
       errorMessage: string;
-    };
+    }
+) & {
+  fetchImplementation?: SlackFetch;
+  slackBotToken?: string;
+};
 
 type PostChannelProcessResponseInput = PostProcessResponseInput & {
   fetchImplementation?: SlackFetch;
@@ -150,29 +154,71 @@ export const postSlackProcessingMessage = async ({
 export const postSlackApplyResponse = async (
   input: PostApplyResponseInput,
 ): Promise<void> => {
-  if (!input.request.responseUrl) {
+  const channelId = input.request.slack?.channelId;
+  const canPostThreadMessage = Boolean(input.slackBotToken && channelId);
+
+  if (!input.request.responseUrl && !canPostThreadMessage) {
     return;
   }
 
   if ('errorMessage' in input) {
-    await postResponseUrl(input.request.responseUrl, {
+    const text = `CRM 변경 적용에 실패했습니다: ${input.errorMessage}`;
+
+    if (canPostThreadMessage && input.slackBotToken) {
+      await postSlackMessage({
+        fetchImplementation: input.fetchImplementation,
+        payload: buildThreadPayload(input.request, {
+          channel: channelId,
+          text,
+        }),
+        slackBotToken: input.slackBotToken,
+      });
+      return;
+    }
+
+    const responseUrl = input.request.responseUrl;
+
+    if (!responseUrl) {
+      return;
+    }
+
+    await postResponseUrl(responseUrl, {
+      replace_original: false,
       response_type: 'ephemeral',
-      text: `CRM 변경 적용에 실패했습니다: ${input.errorMessage}`,
+      text,
     });
     return;
   }
 
-  await postResponseUrl(input.request.responseUrl, {
-    response_type: 'ephemeral',
-    text:
-      Array.isArray(input.result.results) && input.result.results.length > 1
-        ? `CRM 변경 ${input.result.results.length}건을 적용했습니다.`
-        : 'CRM 변경을 적용했습니다.',
+  const text = buildApplySuccessText(input.result);
+
+  if (canPostThreadMessage && input.slackBotToken) {
+    await postSlackMessage({
+      fetchImplementation: input.fetchImplementation,
+      payload: buildThreadPayload(input.request, {
+        channel: channelId,
+        text,
+      }),
+      slackBotToken: input.slackBotToken,
+    });
+    return;
+  }
+
+  const responseUrl = input.request.responseUrl;
+
+  if (!responseUrl) {
+    return;
+  }
+
+  await postResponseUrl(responseUrl, {
+    replace_original: false,
+    response_type: 'in_channel',
+    text,
   });
 };
 
 const buildThreadPayload = (
-  request: SlackAgentProcessRequest,
+  request: { slack?: SlackAgentProcessRequest['slack'] },
   payload: JsonRecord,
 ): JsonRecord => {
   const threadTs = request.slack?.threadTs ?? request.slack?.messageTs;
@@ -292,6 +338,107 @@ const buildProcessErrorText = (errorMessage: string): string => {
   return `CRM agent 처리에 실패했습니다: ${errorMessage}`;
 };
 
+const buildApplySuccessText = (result: SlackAgentApplyResponse): string => {
+  const applyItems =
+    Array.isArray(result.results) && result.results.length > 0
+      ? result.results
+      : [{ draftId: result.draftId, result: result.result }];
+  const summaries = applyItems.flatMap(summarizeApplyResultItem);
+
+  return [
+    '*CRM 변경 적용 완료*',
+    '',
+    summaries.length > 0
+      ? summaries.map((summary) => `• ${summary}`).join('\n')
+      : '• CRM 변경을 적용했습니다.',
+  ].join('\n');
+};
+
+const summarizeApplyResultItem = (item: {
+  draftId: string;
+  result: unknown;
+}): string[] => {
+  const payload = extractMcpPayload(item.result);
+
+  if (!payload) {
+    return [`변경 적용 완료: ${item.draftId}`];
+  }
+
+  const recordReferences = Array.isArray(payload.recordReferences)
+    ? payload.recordReferences.filter(isJsonRecord)
+    : [];
+
+  if (recordReferences.length > 1) {
+    const objectLabel = getObjectLabel(
+      readString(recordReferences[0] ?? {}, 'objectNameSingular'),
+    );
+    const displayNames = recordReferences
+      .map((recordReference) => readString(recordReference, 'displayName'))
+      .filter((displayName): displayName is string => Boolean(displayName));
+
+    return [
+      `${objectLabel} ${recordReferences.length}건 생성/변경: ${displayNames.join(
+        ', ',
+      )}`,
+    ];
+  }
+
+  const recordReference = recordReferences[0];
+
+  if (recordReference) {
+    const objectName = readString(recordReference, 'objectNameSingular');
+    const displayName =
+      readString(recordReference, 'displayName') ??
+      readString(recordReference, 'recordId') ??
+      item.draftId;
+
+    return [`${getObjectLabel(objectName)} 적용: ${displayName}`];
+  }
+
+  const message = typeof payload.message === 'string' ? payload.message : '';
+
+  return [message.length > 0 ? message : `변경 적용 완료: ${item.draftId}`];
+};
+
+const extractMcpPayload = (value: unknown): JsonRecord | null => {
+  if (!isJsonRecord(value) || !Array.isArray(value.content)) {
+    return null;
+  }
+
+  for (const contentItem of value.content) {
+    if (!isJsonRecord(contentItem) || typeof contentItem.text !== 'string') {
+      continue;
+    }
+
+    try {
+      const parsedValue = JSON.parse(contentItem.text) as unknown;
+
+      if (isJsonRecord(parsedValue)) {
+        return parsedValue;
+      }
+    } catch {
+      // Try the next content item.
+    }
+  }
+
+  return null;
+};
+
+const getObjectLabel = (objectName: string | undefined): string => {
+  const labels: Record<string, string> = {
+    company: '회사',
+    note: '노트',
+    noteTarget: '노트 연결',
+    note_target: '노트 연결',
+    opportunity: '영업기회',
+    task: '할 일',
+    taskTarget: '할 일 연결',
+    task_target: '할 일 연결',
+  };
+
+  return objectName ? labels[objectName] ?? objectName : '레코드';
+};
+
 const buildApprovalBlocks = (
   request: SlackAgentProcessRequest,
   result: SlackAgentProcessResponse,
@@ -367,4 +514,13 @@ const readStringArray = (
   }
 
   return candidate.filter((item): item is string => typeof item === 'string');
+};
+
+const readString = (
+  record: JsonRecord,
+  key: string,
+): string | undefined => {
+  const value = record[key];
+
+  return typeof value === 'string' ? value : undefined;
 };

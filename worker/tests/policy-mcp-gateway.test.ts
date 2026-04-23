@@ -239,6 +239,12 @@ describe('PolicyMcpGateway', () => {
                     body: '보안심의 미팅 노트',
                     title: '동서페이먼츠 미팅 노트',
                   },
+                  linkTargets: [
+                    {
+                      targetFieldName: 'targetOpportunity',
+                      targetRecordId: 'opportunity-1',
+                    },
+                  ],
                   toolName: 'create_note',
                 },
               ],
@@ -284,6 +290,12 @@ describe('PolicyMcpGateway', () => {
           body: '보안심의 미팅 노트',
           title: '동서페이먼츠 미팅 노트',
         },
+        linkTargets: [
+          {
+            targetFieldName: 'targetOpportunity',
+            targetRecordId: 'opportunity-1',
+          },
+        ],
         toolName: 'create_note',
       }),
     ]);

@@ -18,6 +18,12 @@ const writeDraftTwo: WriteDraft = {
   arguments: { position: 'first', title: '미팅 노트' },
   createdAt: '2026-04-23T00:01:00.000Z',
   id: 'draft-2',
+  linkTargets: [
+    {
+      targetFieldName: 'targetOpportunity',
+      targetRecordId: 'opportunity-1',
+    },
+  ],
   status: 'pending_approval',
   toolName: 'create_note',
 };

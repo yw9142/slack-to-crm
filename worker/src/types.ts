@@ -15,6 +15,12 @@ export type AgentToolCall = {
   reason?: string;
 };
 
+export type WriteDraftLinkTarget = {
+  position?: number | 'first' | 'last';
+  targetFieldName: string;
+  targetRecordId: string;
+};
+
 export type SlackAgentProcessRequest = {
   slackAgentRequestId: string;
   requestId?: string;
@@ -30,6 +36,7 @@ export type WriteDraft = {
   toolName: string;
   arguments: JsonRecord;
   createdAt: string;
+  linkTargets?: WriteDraftLinkTarget[];
   reason?: string;
   status: 'pending_approval';
   approvalPolicy: 'slack_user_approval_required';
@@ -70,6 +77,7 @@ export type SlackAgentApplyRequest = {
   approvedBySlackUserId?: string;
   approvalId?: string;
   responseUrl?: string;
+  slack?: SlackAgentContext;
 };
 
 export type SlackAgentApplyResponse = {

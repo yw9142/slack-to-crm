@@ -146,6 +146,9 @@ Approval required:
 - For bulk writes, verify scope and summarize count/filter/risk before drafting.
 - If you are preparing an approval summary, you MUST first create captured write drafts with execute_tool write calls or submit_approval_draft.
 - Use submit_approval_draft when the user gives a realistic short field update or meeting recap that maps to several CRM write actions.
+- When creating notes or tasks that must be attached to an opportunity, company, person, or another CRM record, use submit_approval_draft and add linkTargets metadata on that draft item. Do not put relation fields directly into create_note/create_task arguments unless learn_tools says the create tool accepts them.
+- linkTargets format: [{ "targetFieldName": "targetOpportunity" | "targetCompany" | "targetPerson" | another learned NoteTarget/TaskTarget target field, "targetRecordId": "<verified CRM record id>", "position": "first" }]. The worker converts these to the correct join-column writes such as targetOpportunityId.
+- For a meeting recap, normally link the note and every follow-up task to the verified opportunity, and also to the verified person/company when the user context makes that useful.
 - Describing a draft in final text without captured write drafts is not allowed.`;
 
 const FINAL_ANSWER_RULES = `## Final Answer Rules

@@ -165,12 +165,12 @@ export class AgentRunner {
 
     for (const draft of drafts) {
       applyResults.push(
-        await this.policyGateway.applyApprovedDraft({
+        ...(await this.policyGateway.applyApprovedDraftWithRelations({
           approvalId: request.approvalId ?? request.slackAgentApprovalId,
           approvedBySlackUserId:
             request.approvedBySlackUserId ?? 'unknown-slack-user',
           draft,
-        }),
+        })),
       );
     }
 

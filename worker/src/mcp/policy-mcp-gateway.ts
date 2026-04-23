@@ -13,6 +13,7 @@ import type {
   SlackAgentProcessRequest,
   ToolExecutionRecord,
   WriteDraft,
+  WriteDraftLinkTarget,
 } from '../types';
 import type { ToolPolicyGateway } from '../policy/tool-policy-gateway';
 import {
@@ -418,7 +419,12 @@ export class PolicyMcpGateway {
         };
       }
 
-      capturedDrafts.push(policyResult.draft);
+      capturedDrafts.push({
+        ...policyResult.draft,
+        ...(draftInput.linkTargets.length > 0
+          ? { linkTargets: draftInput.linkTargets }
+          : {}),
+      });
     }
 
     const finishedAt = this.now();
@@ -460,7 +466,7 @@ export class PolicyMcpGateway {
 }
 
 const POLICY_MCP_INSTRUCTIONS =
-  'Slack-to-CRM policy MCP server. Follow this workflow: (1) get_tool_catalog to discover tools, (2) learn_tools to get input schemas, (3) execute_tool to run them. Never guess tool names. For comparative/grouped CRM analytics, use group_by tools. Use search_help_center for Twenty usage/help. Writes are never applied here: create/update/delete actions become Slack approval drafts.';
+  'Slack-to-CRM policy MCP server. Follow this workflow: (1) get_tool_catalog to discover tools, (2) learn_tools to get input schemas, (3) execute_tool to run them. Never guess tool names. For comparative/grouped CRM analytics, use group_by tools. Use search_help_center for Twenty usage/help. Writes are never applied here: create/update/delete actions become Slack approval drafts. For create_note/create_task drafts that must attach to CRM records, submit_approval_draft can include linkTargets metadata; the worker will create Note Target or Task Target records only after Slack approval.';
 
 const objectSchema = {
   additionalProperties: true,
@@ -559,6 +565,37 @@ const POLICY_MCP_TOOLS = [
                 description: 'Short human-readable reason for this write.',
                 type: 'string',
               },
+              linkTargets: {
+                description:
+                  'Optional post-create CRM links for create_note/create_many_notes/create_task/create_many_tasks. Use targetFieldName values from NoteTarget/TaskTarget schemas such as targetOpportunity, targetCompany, or targetPerson; the worker writes the matching join column such as targetOpportunityId. targetRecordId must be a verified CRM record id.',
+                items: {
+                  additionalProperties: false,
+                  properties: {
+                    position: {
+                      description:
+                        'Relation ordering. Use "first" unless the user explicitly asks otherwise.',
+                      anyOf: [
+                        { type: 'number' },
+                        { const: 'first', type: 'string' },
+                        { const: 'last', type: 'string' },
+                      ],
+                    },
+                    targetFieldName: {
+                      description:
+                        'Exact relation target field name, for example targetOpportunity, targetCompany, or targetPerson.',
+                      type: 'string',
+                    },
+                    targetRecordId: {
+                      description:
+                        'Verified id of the opportunity, company, person, or other target record.',
+                      type: 'string',
+                    },
+                  },
+                  required: ['targetFieldName', 'targetRecordId'],
+                  type: 'object',
+                },
+                type: 'array',
+              },
               toolName: {
                 description:
                   'Exact write tool name, for example update_opportunity or create_task.',
@@ -608,6 +645,7 @@ const readDraftInputs = (
   toolArguments: JsonRecord,
 ): Array<{
   arguments: JsonRecord;
+  linkTargets: WriteDraftLinkTarget[];
   reason?: string;
   toolName: string;
 }> => {
@@ -623,8 +661,39 @@ const readDraftInputs = (
     return [
       {
         arguments: isJsonRecord(draft.arguments) ? draft.arguments : {},
+        linkTargets: readLinkTargets(draft.linkTargets),
         reason: typeof draft.reason === 'string' ? draft.reason : undefined,
         toolName: draft.toolName,
+      },
+    ];
+  });
+};
+
+const readLinkTargets = (value: unknown): WriteDraftLinkTarget[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (
+      !isJsonRecord(item) ||
+      typeof item.targetFieldName !== 'string' ||
+      typeof item.targetRecordId !== 'string'
+    ) {
+      return [];
+    }
+
+    const position = item.position;
+
+    return [
+      {
+        ...(position === 'first' ||
+        position === 'last' ||
+        typeof position === 'number'
+          ? { position }
+          : {}),
+        targetFieldName: item.targetFieldName,
+        targetRecordId: item.targetRecordId,
       },
     ];
   });

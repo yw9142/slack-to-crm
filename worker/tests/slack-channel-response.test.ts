@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { postSlackChannelProcessResponse } from '../src/slack/response-url';
-import type { JsonRecord, SlackAgentProcessResponse } from '../src/types';
+import {
+  postSlackApplyResponse,
+  postSlackChannelProcessResponse,
+} from '../src/slack/response-url';
+import type {
+  JsonRecord,
+  SlackAgentApplyResponse,
+  SlackAgentProcessResponse,
+} from '../src/types';
 
 describe('postSlackChannelProcessResponse', () => {
   it('posts completed mention responses back to the source Slack thread', async () => {
@@ -121,5 +128,72 @@ describe('postSlackChannelProcessResponse', () => {
         },
       ],
     });
+  });
+});
+
+describe('postSlackApplyResponse', () => {
+  it('preserves the approval message and posts apply results as a new thread message', async () => {
+    const calls: Array<{
+      body: JsonRecord;
+      headers: Record<string, string>;
+      url: string;
+    }> = [];
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      calls.push({
+        body: JSON.parse(String(init?.body)) as JsonRecord,
+        headers: init?.headers as Record<string, string>,
+        url: String(input),
+      });
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      });
+    };
+    const result: SlackAgentApplyResponse = {
+      draftId: 'draft-1',
+      result: {
+        content: [
+          {
+            text: JSON.stringify({
+              recordReferences: [
+                {
+                  displayName: '동서페이먼츠 NetScaler API Gateway DR 구성',
+                  objectNameSingular: 'opportunity',
+                  recordId: 'opportunity-1',
+                },
+              ],
+            }),
+            type: 'text',
+          },
+        ],
+      },
+      status: 'applied',
+      toolName: 'execute_tool',
+    };
+
+    await postSlackApplyResponse({
+      fetchImplementation,
+      request: {
+        responseUrl: 'https://hooks.slack.test/actions/response',
+        slack: {
+          channelId: 'C123',
+          messageTs: '1712345678.000100',
+          threadTs: '1712345678.000100',
+        },
+      },
+      result,
+      slackBotToken: 'xoxb-test-token',
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://slack.com/api/chat.postMessage');
+    expect(calls[0]?.headers.authorization).toBe('Bearer xoxb-test-token');
+    expect(calls[0]?.body).toMatchObject({
+      channel: 'C123',
+      text: expect.stringContaining('*CRM 변경 적용 완료*'),
+      thread_ts: '1712345678.000100',
+    });
+    expect(JSON.stringify(calls[0]?.body)).not.toContain('replace_original');
   });
 });
