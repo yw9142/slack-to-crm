@@ -46,6 +46,7 @@ const outputIndex = args.indexOf('--output-last-message');
 if (outputIndex < 0) process.exit(11);
 if (!args.includes('--ignore-user-config')) process.exit(12);
 if (!args.some((arg) => arg.includes('mcp_servers.slack_crm_policy.url'))) process.exit(13);
+if (!args.some((arg) => arg.includes('default_tools_approval_mode="approve"'))) process.exit(16);
 if (process.env.TWENTY_MCP_READ_TOKEN) process.exit(14);
 if (!process.env.SLACK_CRM_POLICY_MCP_TOKEN) process.exit(15);
 fs.writeFileSync(${JSON.stringify(invocationPath)}, JSON.stringify({ args, token: process.env.SLACK_CRM_POLICY_MCP_TOKEN }));

@@ -204,6 +204,8 @@ export class CodexNativeMcpAgentRunner implements AgentService {
       `mcp_servers.slack_crm_policy.url="${mcpUrl}"`,
       '-c',
       'mcp_servers.slack_crm_policy.bearer_token_env_var="SLACK_CRM_POLICY_MCP_TOKEN"',
+      '-c',
+      'mcp_servers.slack_crm_policy.default_tools_approval_mode="approve"',
       '-',
     ];
 
