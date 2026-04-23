@@ -35,6 +35,8 @@ export class AgentRunner {
   public async process(
     request: SlackAgentProcessRequest,
   ): Promise<SlackAgentProcessResponse> {
+    await this.recordProcessStarted(request);
+
     const metaContext = await this.loadMetaContext(request);
     const learnedToolNames = new Set<string>();
     const toolResults: ToolExecutionRecord[] = [];
@@ -222,6 +224,19 @@ export class AgentRunner {
       });
     } catch {
       // Failure persistence is best effort; Slack still receives a safe error message.
+    }
+  }
+
+  private async recordProcessStarted(
+    request: SlackAgentProcessRequest,
+  ): Promise<void> {
+    try {
+      await this.policyGateway.callSystemWriteTool('update_slack_agent_request', {
+        id: request.slackAgentRequestId,
+        status: 'PROCESSING',
+      });
+    } catch {
+      // Status visibility is useful but should not block processing.
     }
   }
 

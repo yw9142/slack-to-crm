@@ -80,6 +80,8 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     };
 
     try {
+      await this.recordProcessStarted(request);
+
       const initialPrompt = buildNativeMcpPrompt({
         profile: promptProfile,
         request,
@@ -226,6 +228,19 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     errorMessage: string,
   ): Promise<void> {
     return this.persistence.recordProcessFailure(request, errorMessage);
+  }
+
+  private async recordProcessStarted(
+    request: SlackAgentProcessRequest,
+  ): Promise<void> {
+    try {
+      await this.policyGateway.callSystemWriteTool('update_slack_agent_request', {
+        id: request.slackAgentRequestId,
+        status: 'PROCESSING',
+      });
+    } catch {
+      // Status visibility is useful but should not block processing.
+    }
   }
 
   private async runCodex({

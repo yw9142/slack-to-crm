@@ -88,19 +88,31 @@ fs.writeFileSync(args[outputIndex + 1], '*CRM native MCP 응답*');
         agentEngine: 'native-mcp',
         promptProfile: 'daily-sales-guide',
       });
-      expect(writeMcpClient.calls).toEqual([
-        expect.objectContaining({
-          arguments: expect.objectContaining({
+      expect(writeMcpClient.calls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
             arguments: expect.objectContaining({
-              answerText: '*CRM native MCP 응답*',
-              id: 'request-1',
-              status: 'COMPLETED',
+              arguments: expect.objectContaining({
+                id: 'request-1',
+                status: 'PROCESSING',
+              }),
+              toolName: 'update_slack_agent_request',
             }),
-            toolName: 'update_slack_agent_request',
+            name: 'execute_tool',
           }),
-          name: 'execute_tool',
-        }),
-      ]);
+          expect.objectContaining({
+            arguments: expect.objectContaining({
+              arguments: expect.objectContaining({
+                answerText: '*CRM native MCP 응답*',
+                id: 'request-1',
+                status: 'COMPLETED',
+              }),
+              toolName: 'update_slack_agent_request',
+            }),
+            name: 'execute_tool',
+          }),
+        ]),
+      );
 
       const invocation = JSON.parse(
         await readFile(invocationPath, 'utf8'),
