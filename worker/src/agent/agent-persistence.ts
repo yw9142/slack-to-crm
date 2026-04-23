@@ -269,6 +269,7 @@ const findWriteDrafts = (value: unknown): WriteDraft[] => {
     'workerPayload',
     'appliedResult',
     'result',
+    'records',
     'data',
     'record',
     'slackAgentApproval',

@@ -116,4 +116,34 @@ describe('AgentResultPersistence', () => {
       [writeDraftOne, writeDraftTwo],
     );
   });
+
+  it('loads drafts from Twenty MCP result records', async () => {
+    const persistence = new AgentResultPersistence({
+      policyGateway: {
+        async callReadTool() {
+          return {
+            content: [
+              {
+                text: JSON.stringify({
+                  result: {
+                    records: [
+                      {
+                        actions: { drafts: [writeDraftOne, writeDraftTwo] },
+                        workerPayload: null,
+                      },
+                    ],
+                  },
+                }),
+                type: 'text',
+              },
+            ],
+          };
+        },
+      } as unknown as ToolPolicyGateway,
+    });
+
+    await expect(persistence.loadDraftsFromApproval('approval-1')).resolves.toEqual(
+      [writeDraftOne, writeDraftTwo],
+    );
+  });
 });
