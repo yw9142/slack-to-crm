@@ -79,6 +79,35 @@ describe('ToolPolicyGateway', () => {
     expect(writeMcpClient.calls).toHaveLength(0);
   });
 
+  it('runs core-style execute_tool read calls through the read MCP client', async () => {
+    const { gateway, readMcpClient, writeMcpClient } = createGateway();
+
+    const result = await gateway.executeToolCall({
+      arguments: {
+        arguments: {
+          limit: 5,
+        },
+        toolName: 'find_people',
+      },
+      id: 'tool-call-1',
+      name: 'execute_tool',
+    });
+
+    expect(result.kind).toBe('tool_result');
+    expect(readMcpClient.calls).toEqual([
+      {
+        arguments: {
+          arguments: {
+            limit: 5,
+          },
+          toolName: 'find_people',
+        },
+        name: 'execute_tool',
+      },
+    ]);
+    expect(writeMcpClient.calls).toHaveLength(0);
+  });
+
   it('passes meta tools through to the read MCP client', async () => {
     const { gateway, readMcpClient, writeMcpClient } = createGateway();
 
@@ -109,6 +138,41 @@ describe('ToolPolicyGateway', () => {
         name: 'Ada Lovelace',
       },
       name: 'create_person',
+      reason: 'Create a CRM person from Slack request',
+    });
+
+    expect(result.kind).toBe('write_draft');
+
+    if (result.kind !== 'write_draft') {
+      throw new Error('Expected write draft result');
+    }
+
+    expect(result.draft).toEqual({
+      approvalPolicy: 'slack_user_approval_required',
+      arguments: {
+        name: 'Ada Lovelace',
+      },
+      createdAt: '2026-04-22T00:00:00.000Z',
+      id: 'draft-1',
+      reason: 'Create a CRM person from Slack request',
+      status: 'pending_approval',
+      toolName: 'create_person',
+    });
+    expect(readMcpClient.calls).toHaveLength(0);
+    expect(writeMcpClient.calls).toHaveLength(0);
+  });
+
+  it('intercepts core-style execute_tool write calls into drafts before approval', async () => {
+    const { gateway, readMcpClient, writeMcpClient } = createGateway();
+
+    const result = await gateway.executeToolCall({
+      arguments: {
+        arguments: {
+          name: 'Ada Lovelace',
+        },
+        toolName: 'create_person',
+      },
+      name: 'execute_tool',
       reason: 'Create a CRM person from Slack request',
     });
 

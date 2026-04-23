@@ -9,6 +9,7 @@ import { isSlackChannelAllowed, parseSlackEventPayload } from 'src/slack/parsing
 import { jsonRouteResponse, type RouteResponse } from 'src/slack/route-response';
 import {
   SLACK_FORWARDED_REQUEST_HEADERS,
+  isSlackRetryRequest,
   verifySlackRouteSignature,
 } from 'src/slack/route-security';
 import {
@@ -33,6 +34,10 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
       ok: false,
       error: signatureResult.message,
     });
+  }
+
+  if (isSlackRetryRequest(event)) {
+    return jsonRouteResponse(200, { ok: true, ignored: true, reason: 'retry' });
   }
 
   if (slackEvent.kind === 'UNSUPPORTED' || slackEvent.isBotEvent) {

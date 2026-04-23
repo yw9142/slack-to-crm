@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,6 +39,7 @@ export type CodexCliAgentAdapterOptions = {
   codexBinary?: string;
   codexHome?: string;
   model?: string;
+  timeoutMs?: number;
   workingDirectory?: string;
 };
 
@@ -46,28 +47,34 @@ export class CodexCliAgentAdapter implements AgentAdapter {
   private readonly codexBinary: string;
   private readonly codexHome?: string;
   private readonly model?: string;
+  private readonly timeoutMs: number;
   private readonly workingDirectory: string;
 
   public constructor(options: CodexCliAgentAdapterOptions = {}) {
     this.codexBinary = options.codexBinary ?? 'codex';
     this.codexHome = options.codexHome;
     this.model = options.model;
+    this.timeoutMs = options.timeoutMs ?? 120_000;
     this.workingDirectory = options.workingDirectory ?? process.cwd();
   }
 
   public async run(input: AgentAdapterInput): Promise<AgentAdapterOutput> {
     const tempDirectory = await mkdtemp(join(tmpdir(), 'slack-to-crm-codex-'));
     const lastMessagePath = join(tempDirectory, 'last-message.txt');
+    const outputSchemaPath = join(tempDirectory, 'output-schema.json');
 
     try {
+      await writeFile(
+        outputSchemaPath,
+        JSON.stringify(CODEX_OUTPUT_SCHEMA, null, 2),
+      );
       await this.runCodexProcess({
         lastMessagePath,
+        outputSchemaPath,
         prompt: buildCodexPrompt(input),
       });
 
-      return normalizeCodexOutput(
-        JSON.parse(stripJsonCodeFence(await readFile(lastMessagePath, 'utf8'))) as unknown,
-      );
+      return normalizeCodexOutput(parseCodexOutput(await readFile(lastMessagePath, 'utf8')));
     } finally {
       await rm(tempDirectory, { force: true, recursive: true });
     }
@@ -75,21 +82,26 @@ export class CodexCliAgentAdapter implements AgentAdapter {
 
   private runCodexProcess({
     lastMessagePath,
+    outputSchemaPath,
     prompt,
   }: {
     lastMessagePath: string;
+    outputSchemaPath: string;
     prompt: string;
   }): Promise<void> {
     const args = [
       'exec',
       '--skip-git-repo-check',
-      '--full-auto',
       '--sandbox',
       'read-only',
+      '--ignore-rules',
+      '--ephemeral',
       '--color',
       'never',
       '--output-last-message',
       lastMessagePath,
+      '--output-schema',
+      outputSchemaPath,
       '--cd',
       this.workingDirectory,
       '-',
@@ -109,12 +121,27 @@ export class CodexCliAgentAdapter implements AgentAdapter {
       });
 
       let stderr = '';
+      let didTimeOut = false;
+      const timeout = setTimeout(() => {
+        didTimeOut = true;
+        child.kill('SIGTERM');
+      }, this.timeoutMs);
 
       child.stderr.on('data', (chunk: Buffer) => {
         stderr += chunk.toString('utf8');
       });
-      child.on('error', reject);
+      child.on('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
       child.on('close', (exitCode) => {
+        clearTimeout(timeout);
+
+        if (didTimeOut) {
+          reject(new Error('Codex CLI timed out'));
+          return;
+        }
+
         if (exitCode !== 0) {
           reject(
             new Error(
@@ -136,7 +163,8 @@ export class CodexCliAgentAdapter implements AgentAdapter {
 const buildCodexPrompt = (input: AgentAdapterInput): string =>
   [
     input.systemPrompt,
-    'Use the MCP catalog and skills in the request context. Return one JSON object only.',
+    'Use the MCP catalog and tool history in the request context. Return one JSON object only, with no markdown and no surrounding commentary.',
+    'If you need a schema before using a CRM tool, request learn_tools first. To run CRM tools, request execute_tool with { toolName, arguments }. If a write is needed, request execute_tool for that write tool so the worker can create an approval draft.',
     'JSON shape:',
     JSON.stringify(
       {
@@ -144,7 +172,7 @@ const buildCodexPrompt = (input: AgentAdapterInput): string =>
         metadata: { mode: 'answer | write_draft | applied' },
         toolCalls: [
           {
-            name: 'get_tool_catalog | learn_tools | load_skills | find_* | find_one_* | group_by_* | create_* | update_* | delete_*',
+            name: 'get_tool_catalog | learn_tools | load_skills | execute_tool',
             arguments: {},
             reason: '<why this tool is needed>',
           },
@@ -163,6 +191,23 @@ const stripJsonCodeFence = (value: string): string =>
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '')
     .trim();
+
+const parseCodexOutput = (value: string): unknown => {
+  const cleanedValue = stripJsonCodeFence(value);
+
+  try {
+    return JSON.parse(cleanedValue) as unknown;
+  } catch {
+    const startIndex = cleanedValue.indexOf('{');
+    const endIndex = cleanedValue.lastIndexOf('}');
+
+    if (startIndex >= 0 && endIndex > startIndex) {
+      return JSON.parse(cleanedValue.slice(startIndex, endIndex + 1)) as unknown;
+    }
+
+    throw new Error('Codex output was not valid JSON');
+  }
+};
 
 const isJsonRecord = (value: unknown): value is JsonRecord =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -200,3 +245,40 @@ const normalizeToolCall = (value: unknown): AgentToolCall[] => {
     },
   ];
 };
+
+const CODEX_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['assistantMessage', 'metadata', 'toolCalls'],
+  properties: {
+    assistantMessage: { type: 'string' },
+    metadata: {
+      type: 'object',
+      additionalProperties: true,
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['answer', 'write_draft', 'applied'],
+        },
+      },
+      required: ['mode'],
+    },
+    toolCalls: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'arguments', 'reason'],
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          arguments: {
+            type: 'object',
+            additionalProperties: true,
+          },
+          reason: { type: 'string' },
+        },
+      },
+    },
+  },
+} as const;

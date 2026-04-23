@@ -21,6 +21,10 @@ export type SlackRouteSignatureResult =
   | { ok: true }
   | { ok: false; statusCode: number; message: string };
 
+export function isSlackRetryRequest(event: RoutePayload<unknown>): boolean {
+  return getHeaderValue(event.headers, 'x-slack-retry-num') !== undefined;
+}
+
 export function verifySlackRouteSignature(
   event: RoutePayload<unknown>,
 ): SlackRouteSignatureResult {

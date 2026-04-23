@@ -16,6 +16,7 @@ const META_TOOL_NAMES = new Set([
   'learn_tools',
   'load_skills',
 ]);
+const EXECUTE_TOOL_NAME = 'execute_tool';
 
 export type ToolClassification = 'read' | 'meta' | 'write' | 'denied';
 
@@ -88,6 +89,10 @@ export class ToolPolicyGateway {
   public async executeToolCall(
     toolCall: AgentToolCall,
   ): Promise<ToolPolicyGatewayResult> {
+    if (toolCall.name === EXECUTE_TOOL_NAME) {
+      return this.executeCoreStyleToolCall(toolCall);
+    }
+
     const classification = classifyToolName(toolCall.name);
     const toolArguments = toolCall.arguments ?? {};
 
@@ -183,6 +188,64 @@ export class ToolPolicyGateway {
     };
   }
 
+  private async executeCoreStyleToolCall(
+    toolCall: AgentToolCall,
+  ): Promise<ToolPolicyGatewayResult> {
+    const toolName =
+      typeof toolCall.arguments?.toolName === 'string'
+        ? toolCall.arguments.toolName
+        : undefined;
+    const toolArguments = isJsonRecord(toolCall.arguments?.arguments)
+      ? toolCall.arguments.arguments
+      : {};
+
+    if (!toolName) {
+      return {
+        kind: 'denied',
+        message: 'execute_tool requires a toolName string',
+        toolCall,
+      };
+    }
+
+    const classification = classifyToolName(toolName);
+
+    if (classification === 'read') {
+      const result = await this.executeTwentyTool(
+        this.readMcpClient,
+        toolName,
+        toolArguments,
+      );
+
+      return {
+        classification,
+        kind: 'tool_result',
+        result,
+        toolCall,
+      };
+    }
+
+    if (classification === 'write') {
+      return {
+        draft: this.createWriteDraft(
+          {
+            ...toolCall,
+            arguments: toolArguments,
+            name: toolName,
+          },
+          toolArguments,
+        ),
+        kind: 'write_draft',
+        toolCall,
+      };
+    }
+
+    return {
+      kind: 'denied',
+      message: `execute_tool cannot run "${toolName}" through the worker policy`,
+      toolCall,
+    };
+  }
+
   private executeTwentyTool(
     mcpClient: TwentyMcpToolClient,
     toolName: string,
@@ -194,3 +257,6 @@ export class ToolPolicyGateway {
     });
   }
 }
+
+const isJsonRecord = (value: unknown): value is JsonRecord =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);

@@ -49,7 +49,7 @@ export const postSlackProcessResponse = async (
   if ('errorMessage' in input) {
     await postResponseUrl(input.request.responseUrl, {
       response_type: 'ephemeral',
-      text: `CRM agent 처리에 실패했습니다: ${input.errorMessage}`,
+      text: buildProcessErrorText(input.errorMessage ?? 'Unknown worker error'),
     });
     return;
   }
@@ -85,7 +85,7 @@ export const postSlackChannelProcessResponse = async (
       fetchImplementation: input.fetchImplementation,
       payload: buildThreadPayload(input.request, {
         channel: channelId,
-        text: `CRM agent 처리에 실패했습니다: ${input.errorMessage}`,
+        text: buildProcessErrorText(input.errorMessage ?? 'Unknown worker error'),
       }),
       slackBotToken: input.slackBotToken,
     });
@@ -212,6 +212,24 @@ const buildApprovalText = (result: SlackAgentProcessResponse): string =>
     result.assistantMessage,
     ...result.writeDrafts.map(formatWriteDraft),
   ].join('\n');
+
+const buildProcessErrorText = (errorMessage: string): string => {
+  const lowerCaseMessage = errorMessage.toLowerCase();
+
+  if (lowerCaseMessage.includes('timed out')) {
+    return 'CRM agent 처리 시간이 초과됐습니다. 요청 범위를 조금 줄여 다시 시도해 주세요.';
+  }
+
+  if (
+    lowerCaseMessage.includes('codex') ||
+    lowerCaseMessage.includes('request:') ||
+    lowerCaseMessage.length > 240
+  ) {
+    return 'CRM agent 처리 중 내부 오류가 발생했습니다. 요청은 저장됐으니 Slack Agent Requests에서 상태를 확인해 주세요.';
+  }
+
+  return `CRM agent 처리에 실패했습니다: ${errorMessage}`;
+};
 
 const buildApprovalBlocks = (
   request: SlackAgentProcessRequest,

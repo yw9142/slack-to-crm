@@ -16,6 +16,7 @@ import {
 } from 'src/slack/route-response';
 import {
   SLACK_FORWARDED_REQUEST_HEADERS,
+  isSlackRetryRequest,
   verifySlackRouteSignature,
 } from 'src/slack/route-security';
 import {
@@ -34,6 +35,10 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
       ok: false,
       error: signatureResult.message,
     });
+  }
+
+  if (isSlackRetryRequest(event)) {
+    return slackAcknowledgementResponse('CRM agent request already received.');
   }
 
   const command = parseSlackCommandPayload(event.body);

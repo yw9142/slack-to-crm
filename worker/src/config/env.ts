@@ -3,6 +3,7 @@ export type WorkerEnv = {
   codexBinary: string;
   codexHome?: string;
   codexModel?: string;
+  codexTimeoutMs: number;
   codexWorkingDirectory: string;
   port: number;
   sharedSecret: string;
@@ -34,6 +35,19 @@ const parsePort = (value: string | undefined): number => {
   return port;
 };
 
+const parsePositiveInteger = (
+  value: string | undefined,
+  defaultValue: number,
+): number => {
+  const parsedValue = Number(value ?? String(defaultValue));
+
+  if (!Number.isInteger(parsedValue) || parsedValue <= 0) {
+    throw new Error(`Invalid positive integer: ${value ?? ''}`);
+  }
+
+  return parsedValue;
+};
+
 export const loadWorkerEnv = (
   source: EnvSource = process.env,
 ): WorkerEnv => ({
@@ -42,6 +56,7 @@ export const loadWorkerEnv = (
   codexBinary: source.CODEX_BINARY ?? 'codex',
   codexHome: source.CODEX_HOME,
   codexModel: source.CODEX_MODEL,
+  codexTimeoutMs: parsePositiveInteger(source.CODEX_TIMEOUT_MS, 120_000),
   codexWorkingDirectory: source.CODEX_WORKDIR ?? process.cwd(),
   port: parsePort(source.WORKER_PORT ?? source.PORT),
   sharedSecret:

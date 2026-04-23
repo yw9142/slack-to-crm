@@ -36,6 +36,7 @@ export const createAgentRunner = (
           codexBinary: options.env.codexBinary,
           codexHome: options.env.codexHome,
           model: options.env.codexModel,
+          timeoutMs: options.env.codexTimeoutMs,
           workingDirectory: options.env.codexWorkingDirectory,
         });
 

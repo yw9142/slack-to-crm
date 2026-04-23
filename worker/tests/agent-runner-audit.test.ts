@@ -19,13 +19,30 @@ describe('AgentRunner audit persistence', () => {
 
         if (adapterCalls === 1) {
           return {
+            assistantMessage: '스키마 확인 중입니다.',
+            metadata: {},
+            toolCalls: [
+              {
+                arguments: { toolNames: ['find_companies'] },
+                id: 'tool-call-1',
+                name: 'learn_tools',
+              },
+            ],
+          };
+        }
+
+        if (adapterCalls === 2) {
+          return {
             assistantMessage: '조회 중입니다.',
             metadata: {},
             toolCalls: [
               {
-                arguments: { limit: 1 },
-                id: 'tool-call-1',
-                name: 'find_companies',
+                arguments: {
+                  arguments: { limit: 1 },
+                  toolName: 'find_companies',
+                },
+                id: 'tool-call-2',
+                name: 'execute_tool',
               },
             ],
           };
@@ -50,6 +67,24 @@ describe('AgentRunner audit persistence', () => {
         return { id: `${name}-id` };
       },
       async executeToolCall(toolCall: AgentToolCall) {
+        if (toolCall.name === 'learn_tools') {
+          return {
+            classification: 'meta',
+            kind: 'tool_result',
+            result: {
+              content: [
+                {
+                  text: JSON.stringify({
+                    tools: [{ name: 'find_companies' }],
+                  }),
+                  type: 'text',
+                },
+              ],
+            },
+            toolCall,
+          } as const;
+        }
+
         return {
           classification: 'read',
           kind: 'tool_result',
