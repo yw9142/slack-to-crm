@@ -92,4 +92,28 @@ describe('AgentResultPersistence', () => {
       [writeDraftOne, writeDraftTwo],
     );
   });
+
+  it('loads drafts from approval actions when workerPayload is missing', async () => {
+    const persistence = new AgentResultPersistence({
+      policyGateway: {
+        async callReadTool() {
+          return {
+            content: [
+              {
+                text: JSON.stringify({
+                  actions: { drafts: [writeDraftOne, writeDraftTwo] },
+                  workerPayload: null,
+                }),
+                type: 'text',
+              },
+            ],
+          };
+        },
+      } as unknown as ToolPolicyGateway,
+    });
+
+    await expect(persistence.loadDraftsFromApproval('approval-1')).resolves.toEqual(
+      [writeDraftOne, writeDraftTwo],
+    );
+  });
 });

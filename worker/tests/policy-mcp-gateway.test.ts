@@ -206,6 +206,99 @@ describe('PolicyMcpGateway', () => {
     });
   });
 
+  it('captures bundled submit_approval_draft calls as write drafts', async () => {
+    const { policyMcpGateway, readMcpClient, writeMcpClient } = createGateway();
+    const session = policyMcpGateway.createSession({
+      request: {
+        slackAgentRequestId: 'request-1',
+        text: '미팅 끝났으니 CRM에 반영할 승인초안 만들어줘',
+      },
+    });
+    const response = createMockResponse();
+
+    await policyMcpGateway.handleHttpRequest(
+      createMockRequest({
+        authorization: `Bearer ${session.token}`,
+        body: {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: {
+            arguments: {
+              drafts: [
+                {
+                  arguments: {
+                    id: 'opportunity-1',
+                    riskStatus: 'WATCH',
+                  },
+                  reason: '미팅 후 리스크 완화',
+                  toolName: 'update_opportunity',
+                },
+                {
+                  arguments: {
+                    body: '보안심의 미팅 노트',
+                    title: '동서페이먼츠 미팅 노트',
+                  },
+                  toolName: 'create_note',
+                },
+              ],
+              summary: '동서페이먼츠 미팅 후속조치',
+            },
+            name: 'submit_approval_draft',
+          },
+        },
+      }),
+      response,
+      new URL(`http://localhost/mcp/${session.id}`),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(readMcpClient.calls).toHaveLength(0);
+    expect(writeMcpClient.calls).toHaveLength(0);
+
+    const responseBody = JSON.parse(response.body) as JsonRecord;
+    const result = responseBody.result as JsonRecord;
+    const resultText = String(
+      (result.content as Array<{ text: string }>)[0]?.text,
+    );
+    const parsedResult = JSON.parse(resultText) as JsonRecord;
+
+    expect(parsedResult).toMatchObject({
+      approvalRequired: true,
+      message: expect.stringContaining('Slack approval draft'),
+    });
+
+    const sessionResult = policyMcpGateway.getSessionResult(session.id);
+
+    expect(sessionResult.writeDrafts).toEqual([
+      expect.objectContaining({
+        arguments: {
+          id: 'opportunity-1',
+          riskStatus: 'WATCH',
+        },
+        reason: '미팅 후 리스크 완화',
+        toolName: 'update_opportunity',
+      }),
+      expect.objectContaining({
+        arguments: {
+          body: '보안심의 미팅 노트',
+          title: '동서페이먼츠 미팅 노트',
+        },
+        toolName: 'create_note',
+      }),
+    ]);
+    expect(sessionResult.toolResults).toEqual([
+      expect.objectContaining({
+        kind: 'write_draft',
+        toolName: 'update_opportunity',
+      }),
+      expect.objectContaining({
+        kind: 'write_draft',
+        toolName: 'create_note',
+      }),
+    ]);
+  });
+
   it('defaults tool catalog categories by request profile without over-compacting small catalogs', async () => {
     const { policyMcpGateway, readMcpClient } = createGateway();
     const session = policyMcpGateway.createSession({

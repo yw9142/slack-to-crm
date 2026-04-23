@@ -64,6 +64,7 @@ describe('core parity prompt', () => {
 
     expect(prompt).toContain('Plan -> Skill -> Learn -> Execute');
     expect(prompt).toContain('get_tool_catalog to discover tools');
+    expect(prompt).toContain('submit_approval_draft');
     expect(prompt).toContain('Approval required');
     expect(prompt).toContain('Describing a draft in final text');
     expect(prompt).toContain('📊 일일 영업 가이드');

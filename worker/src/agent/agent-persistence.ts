@@ -265,6 +265,7 @@ const findWriteDrafts = (value: unknown): WriteDraft[] => {
   for (const candidateKey of [
     'drafts',
     'draft',
+    'actions',
     'workerPayload',
     'appliedResult',
     'result',

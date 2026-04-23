@@ -21,6 +21,7 @@ import {
   isJsonRecord,
   normalizeJsonRecord,
 } from '../policy/tool-execution-record';
+import { classifyToolName } from '../policy/tool-policy-gateway';
 
 type JsonRpcId = string | number | null;
 
@@ -235,6 +236,10 @@ export class PolicyMcpGateway {
     toolName: string,
     toolArguments: JsonRecord,
   ): Promise<McpToolCallResult> {
+    if (toolName === 'submit_approval_draft') {
+      return this.submitApprovalDrafts(session, toolArguments);
+    }
+
     const startedAt = this.now();
     const normalizedToolArguments = withPolicyToolDefaults(
       toolName,
@@ -352,6 +357,106 @@ export class PolicyMcpGateway {
       isError: true,
     };
   }
+
+  private async submitApprovalDrafts(
+    session: PolicyMcpSession,
+    toolArguments: JsonRecord,
+  ): Promise<McpToolCallResult> {
+    const startedAt = this.now();
+    const draftInputs = readDraftInputs(toolArguments);
+
+    if (draftInputs.length === 0) {
+      return {
+        content: [
+          {
+            text: JSON.stringify({
+              error:
+                'submit_approval_draft requires a non-empty drafts array. Each draft needs toolName and arguments.',
+            }),
+            type: 'text',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const capturedDrafts: WriteDraft[] = [];
+
+    for (const draftInput of draftInputs) {
+      if (classifyToolName(draftInput.toolName) !== 'write') {
+        return {
+          content: [
+            {
+              text: JSON.stringify({
+                error: `submit_approval_draft only accepts CRM write tools. Received ${draftInput.toolName}.`,
+              }),
+              type: 'text',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const policyResult = await this.policyGateway.executeToolCall({
+        arguments: draftInput.arguments,
+        id: randomUUID(),
+        name: draftInput.toolName,
+        reason: draftInput.reason,
+      });
+
+      if (policyResult.kind !== 'write_draft') {
+        return {
+          content: [
+            {
+              text: JSON.stringify({
+                error: `Failed to create approval draft for ${draftInput.toolName}.`,
+              }),
+              type: 'text',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      capturedDrafts.push(policyResult.draft);
+    }
+
+    const finishedAt = this.now();
+
+    for (const draft of capturedDrafts) {
+      session.writeDrafts.push(draft);
+      session.toolResults.push({
+        draft,
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        input: draft.arguments,
+        kind: 'write_draft',
+        policySessionId: session.id,
+        promptProfile: session.profile,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        toolCallId: draft.id,
+        toolName: draft.toolName,
+      });
+    }
+
+    return {
+      content: [
+        {
+          text: JSON.stringify({
+            approvalRequired: true,
+            drafts: capturedDrafts,
+            message:
+              'Write actions captured as one Slack approval draft. Do not claim they have been applied.',
+            summary:
+              typeof toolArguments.summary === 'string'
+                ? toolArguments.summary
+                : undefined,
+          }),
+          type: 'text',
+        },
+      ],
+    };
+  }
 }
 
 const POLICY_MCP_INSTRUCTIONS =
@@ -439,6 +544,44 @@ const POLICY_MCP_TOOLS = [
   },
   {
     description:
+      'Submit one or more concrete CRM write actions as a Slack approval draft after validating targets with read tools. Use this for natural-language meeting updates that require several create/update/delete actions. This never applies CRM writes immediately.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        drafts: {
+          description:
+            'Concrete write actions to approve. Each item must use an exact CRM write tool name and schema-compatible arguments.',
+          items: {
+            additionalProperties: false,
+            properties: {
+              arguments: objectSchema,
+              reason: {
+                description: 'Short human-readable reason for this write.',
+                type: 'string',
+              },
+              toolName: {
+                description:
+                  'Exact write tool name, for example update_opportunity or create_task.',
+                type: 'string',
+              },
+            },
+            required: ['toolName', 'arguments'],
+            type: 'object',
+          },
+          type: 'array',
+        },
+        summary: {
+          description: 'Short summary shown in the approval context.',
+          type: 'string',
+        },
+      },
+      required: ['drafts'],
+      type: 'object',
+    },
+    name: 'submit_approval_draft',
+  },
+  {
+    description:
       'Search the Twenty documentation and help center for setup, usage, and troubleshooting guidance.',
     inputSchema: {
       additionalProperties: true,
@@ -459,6 +602,32 @@ const readReason = (toolArguments: JsonRecord): string | undefined => {
   const reason = toolArguments.reason;
 
   return typeof reason === 'string' ? reason : undefined;
+};
+
+const readDraftInputs = (
+  toolArguments: JsonRecord,
+): Array<{
+  arguments: JsonRecord;
+  reason?: string;
+  toolName: string;
+}> => {
+  const drafts = Array.isArray(toolArguments.drafts)
+    ? toolArguments.drafts
+    : [];
+
+  return drafts.flatMap((draft) => {
+    if (!isJsonRecord(draft) || typeof draft.toolName !== 'string') {
+      return [];
+    }
+
+    return [
+      {
+        arguments: isJsonRecord(draft.arguments) ? draft.arguments : {},
+        reason: typeof draft.reason === 'string' ? draft.reason : undefined,
+        toolName: draft.toolName,
+      },
+    ];
+  });
 };
 
 const withPolicyToolDefaults = (
