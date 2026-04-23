@@ -15,8 +15,13 @@ export const formatSlackRichAnswer = (value: string): string => {
   const withSlackMarkdown = convertMarkdownToSlackMrkdwn(withoutMarkdownTables);
   const withKoreanMoneyUnits =
     normalizeKoreanWonAmountsInText(withSlackMarkdown);
+  const withReadableRecordBlocks =
+    expandDenseLabeledBulletLines(withKoreanMoneyUnits);
+  const withSlackSectionSpacing = normalizeSlackSectionSpacing(
+    withReadableRecordBlocks,
+  );
 
-  return moveConfirmationSectionsToBottom(withKoreanMoneyUnits);
+  return moveConfirmationSectionsToBottom(withSlackSectionSpacing);
 };
 
 const convertMarkdownTables = (value: string): string => {
@@ -118,12 +123,256 @@ const formatMarkdownTableRows = (
           header,
         );
 
-        return `*${formattedHeader}*: ${formattedCell}`;
+        return {
+          label: formattedHeader,
+          value: formattedCell,
+        };
       })
-      .filter((cell): cell is string => cell !== undefined);
+      .filter((cell): cell is LabeledField => cell !== undefined);
 
-    return `• ${formattedCells.join(' · ')}`;
+    return formatLabeledFieldsAsSlackBlock(formattedCells);
   });
+
+type LabeledField = {
+  label: string;
+  value: string;
+};
+
+const expandDenseLabeledBulletLines = (value: string): string =>
+  value
+    .split('\n')
+    .map((line) => {
+      const bulletMatch = line.match(/^([•*-])\s+(.+)$/);
+
+      if (!bulletMatch) {
+        return line;
+      }
+
+      const fields = parseDenseLabeledFields(bulletMatch[2] ?? '');
+
+      if (fields.length < 3) {
+        return line;
+      }
+
+      const formattedBlock = formatLabeledFieldsAsSlackBlock(fields);
+
+      return formattedBlock === line ? line : formattedBlock;
+    })
+    .join('\n');
+
+const parseDenseLabeledFields = (value: string): LabeledField[] => {
+  const parts = value.split(/\s+·\s+/);
+
+  if (parts.length < 3) {
+    return [];
+  }
+
+  const fields = parts
+    .map((part) => {
+      const match = part.match(/^\*([^*\n]{1,48})\*:\s*(.*)$/);
+
+      if (!match) {
+        return undefined;
+      }
+
+      return {
+        label: match[1]?.trim() ?? '',
+        value: match[2]?.trim() ?? '',
+      };
+    })
+    .filter((field): field is LabeledField =>
+      Boolean(field?.label && field.value),
+    );
+
+  return fields.length === parts.length ? fields : [];
+};
+
+const formatLabeledFieldsAsSlackBlock = (fields: LabeledField[]): string => {
+  if (fields.length === 0) {
+    return '';
+  }
+
+  const primaryFieldIndex = findPrimaryFieldIndex(fields);
+  const primaryField = fields[primaryFieldIndex] ?? fields[0];
+
+  if (!primaryField) {
+    return '';
+  }
+
+  const title = buildPrimaryTitle(primaryField, fields);
+  const detailFields = fields.filter(
+    (field, fieldIndex) =>
+      fieldIndex !== primaryFieldIndex && !shouldHideDetailField(field, fields),
+  );
+
+  const inlineDetails = buildInlineFieldLine(detailFields);
+
+  if (detailFields.length <= 2 && inlineDetails.length < 90) {
+    return `• *${title}*${detailFields.length > 0 ? ` · ${inlineDetails}` : ''}`;
+  }
+
+  return [
+    `• *${title}*`,
+    ...groupDetailFields(detailFields).map((line) => `  ${line}`),
+  ].join('\n');
+};
+
+const findPrimaryFieldIndex = (fields: LabeledField[]): number => {
+  const primaryLabels = [
+    '딜',
+    '영업기회',
+    '회사',
+    '구분',
+    'Stage',
+    '단계',
+    '상태',
+    'Close',
+    '연락처',
+    '주요 연락처',
+  ];
+
+  const foundIndex = fields.findIndex((field) =>
+    primaryLabels.some(
+      (label) => field.label.toLowerCase() === label.toLowerCase(),
+    ),
+  );
+
+  return foundIndex >= 0 ? foundIndex : 0;
+};
+
+const buildPrimaryTitle = (
+  primaryField: LabeledField,
+  fields: LabeledField[],
+): string => {
+  const priority = findFieldValue(fields, '우선');
+
+  if (priority && ['딜', '영업기회'].includes(primaryField.label)) {
+    return `${priority}. ${primaryField.value}`;
+  }
+
+  const closeDate = findFieldValue(fields, 'Close');
+
+  if (closeDate && primaryField.label !== 'Close') {
+    return `${primaryField.value} (${closeDate})`;
+  }
+
+  return primaryField.value;
+};
+
+const shouldHideDetailField = (
+  field: LabeledField,
+  fields: LabeledField[],
+): boolean =>
+  field.label === '우선' &&
+  fields.some((candidateField) =>
+    ['딜', '영업기회'].includes(candidateField.label),
+  );
+
+const findFieldValue = (
+  fields: LabeledField[],
+  label: string,
+): string | undefined =>
+  fields.find((field) => field.label.toLowerCase() === label.toLowerCase())
+    ?.value;
+
+const groupDetailFields = (fields: LabeledField[]): string[] => {
+  const compactLabels = new Set([
+    '건수',
+    '금액',
+    'Stage',
+    'Stage / Health',
+    '단계',
+    '상태',
+    'Forecast',
+    'Health',
+  ]);
+  const lines: string[] = [];
+  let compactFields: LabeledField[] = [];
+
+  const flushCompactFields = () => {
+    if (compactFields.length === 0) {
+      return;
+    }
+
+    lines.push(buildInlineFieldLine(compactFields));
+    compactFields = [];
+  };
+
+  for (const field of fields) {
+    const nextCompactLine = buildInlineFieldLine([...compactFields, field]);
+
+    if (compactLabels.has(field.label) && nextCompactLine.length <= 96) {
+      compactFields.push(field);
+      continue;
+    }
+
+    flushCompactFields();
+    lines.push(`${field.label}: ${field.value}`);
+  }
+
+  flushCompactFields();
+
+  return lines;
+};
+
+const buildInlineFieldLine = (fields: LabeledField[]): string =>
+  fields.map((field) => `${field.label}: ${field.value}`).join(' · ');
+
+const normalizeSlackSectionSpacing = (value: string): string => {
+  const lines = value.split('\n');
+  const formattedLines: string[] = [];
+  let isInsideCodeFence = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+
+    if (line.trimStart().startsWith('```')) {
+      isInsideCodeFence = !isInsideCodeFence;
+      formattedLines.push(line);
+      continue;
+    }
+
+    if (!isInsideCodeFence && isSlackSectionHeading(line)) {
+      if (
+        formattedLines.length > 0 &&
+        formattedLines[formattedLines.length - 1] !== ''
+      ) {
+        formattedLines.push('');
+      }
+
+      formattedLines.push(line);
+      formattedLines.push('');
+      continue;
+    }
+
+    formattedLines.push(line);
+  }
+
+  return collapseExcessBlankLines(formattedLines).join('\n').trim();
+};
+
+const isSlackSectionHeading = (line: string): boolean => {
+  const trimmedLine = line.trim();
+
+  return /^\*[^*\n]{1,80}\*:?\s*$/.test(trimmedLine);
+};
+
+const collapseExcessBlankLines = (lines: string[]): string[] => {
+  const collapsedLines: string[] = [];
+
+  for (const line of lines) {
+    const previousLine = collapsedLines[collapsedLines.length - 1];
+    const lineBeforePrevious = collapsedLines[collapsedLines.length - 2];
+
+    if (line === '' && previousLine === '' && lineBeforePrevious === '') {
+      continue;
+    }
+
+    collapsedLines.push(line);
+  }
+
+  return collapsedLines;
+};
 
 const convertMarkdownToSlackMrkdwn = (value: string): string => {
   const lines = value.split('\n');

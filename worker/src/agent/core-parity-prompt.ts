@@ -88,6 +88,7 @@ For simple CRUD operations, you do not need a skill, but you still MUST call lea
 const CORE_RESPONSE_FORMAT_PROMPT = `## Response Format
 
 Format responses with markdown for clarity: headings, lists, code blocks, and compact tables.
+For Slack, tables should be written as readable record blocks instead of dense one-line rows.
 
 Record References:
 - Tool responses can include recordReferences arrays.
@@ -111,7 +112,13 @@ const SLACK_RESPONSE_STYLE_PROMPT = `## Slack Response Style
 Respond in Korean unless the user clearly asks for another language.
 Optimize for Slack readability:
 - Use clear section headings with light emoji where useful.
-- Prefer concise tables, aligned lists, and numbered action items.
+- Prefer concise record blocks, aligned lists, and numbered action items.
+- Put a blank line between major sections and between long deal/risk/contact blocks.
+- Do not compress many fields into one long bullet separated only by "·".
+- For CRM records with 3+ fields, use this layout:
+  • *Primary label*
+    Field A: value · Field B: value
+    Next action: concrete action
 - Include enough detail for a sales lead or CRM operator to act without asking a follow-up.
 - Put missing data, failed metrics, or caveats at the bottom under "확인 필요".
 - Keep raw JSON, stack traces, tool internals, and MCP protocol details out of the final answer.

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { formatSlackRichAnswer } from '../src/slack/slack-rich-formatter';
 
 describe('formatSlackRichAnswer', () => {
-  it('converts markdown tables into compact Slack bullets with KRW units', () => {
+  it('converts markdown tables into readable Slack record blocks with KRW units', () => {
     const result = formatSlackRichAnswer(
       [
         '## 📊 파이프라인',
@@ -17,8 +17,13 @@ describe('formatSlackRichAnswer', () => {
     expect(result).toBe(
       [
         '*📊 파이프라인*',
-        '• *딜*: ERP 도입 · *회사*: 다우데이타 · *금액*: 1.2억 · *단계*: 제안',
-        '• *딜*: 보안 갱신 · *회사*: ABC · *금액*: 3,500만원 · *단계*: 협상',
+        '',
+        '• *ERP 도입*',
+        '  회사: 다우데이타',
+        '  금액: 1.2억 · 단계: 제안',
+        '• *보안 갱신*',
+        '  회사: ABC',
+        '  금액: 3,500만원 · 단계: 협상',
       ].join('\n'),
     );
   });
@@ -37,10 +42,26 @@ describe('formatSlackRichAnswer', () => {
     expect(result).toBe(
       [
         '*✅ 요약*',
+        '',
         '요청한 회사 2건을 확인했습니다.',
         '',
         '*⚠️ 확인 필요*',
+        '',
         '- 담당자 이메일은 CRM에서 찾지 못했습니다.',
+      ].join('\n'),
+    );
+  });
+
+  it('expands dense labeled Slack bullets into multi-line blocks', () => {
+    const result = formatSlackRichAnswer(
+      '• *우선*: 1 · *딜*: 동서페이먼츠 NetScaler · *금액*: KRW 132000000 · *Stage / Health*: NEGOTIATION / AT_RISK · *추천 액션*: 보안심의 자료 제출',
+    );
+
+    expect(result).toBe(
+      [
+        '• *1. 동서페이먼츠 NetScaler*',
+        '  금액: 1.32억 · Stage / Health: NEGOTIATION / AT_RISK',
+        '  추천 액션: 보안심의 자료 제출',
       ].join('\n'),
     );
   });

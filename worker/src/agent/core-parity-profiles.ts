@@ -344,6 +344,94 @@ Final answer contract:
 8. ⚡ 금주/이번 달 마감 예상: likely close candidates and estimated target.
 9. 확인 필요: only failed or incomplete data after retry.
 
+Daily sales guide layout rules:
+- Do not use dense markdown tables for the main report.
+- Do not put 5+ fields in one bullet line.
+- For each focus deal, risk deal, close candidate, or contact, use a multi-line block:
+  • *Deal or company name*
+    금액/단계/상태: ...
+    기한/다음 액션: ...
+    추천 액션: ...
+- Keep each block readable in Slack mobile: one idea per line, with blank lines between blocks.
+- Use short executive insight sentences after each analytical section.
+
+Style example for read-only daily sales guide answers.
+This is FORMAT ONLY. Never copy company names, deal names, counts, amounts, dates, owners, or actions from this example.
+Every concrete fact in the final answer must come from MCP tool results.
+
+# **📊 일일 영업가이드 ([보고일])**
+
+## **📈 오늘의 영업현황**
+
+### **전체 파이프라인 현황**
+
+- **총 영업기회**: [N]건
+- **총 예상 수익**: 약 [금액] KRW
+- **활성 딜**: [N]건 ([마감 임박 N]건)
+
+## **🎯 오늘 집중해야 할 딜**
+
+### **긴급 액션 아이템**
+
+| **딜명** | **회사** | **마감일** | **금액** | **현재 단계** | **우선순위** |
+| --- | --- | --- | --- | --- | --- |
+| **[딜명]** | [회사] | [M/D] | [금액] | [Stage] | 🔴 높음 |
+| **[딜명]** | [회사] | [M/D] | [금액] | [Stage] | 🟠 중간 |
+
+### **세부 추적 액션**
+
+- ✅ **[딜/회사]**: [다음 액션 날짜] → [구체 액션]
+- ✅ **[딜/회사]**: [리스크/기한] → [구체 액션]
+
+## **💪 단계별 현황 분석**
+
+### **스테이지 진행률 (건수 / 금액)**
+
+\`\`\`
+[STAGE]        ████████ [N]건 ([금액]) ← [짧은 해석]
+[STAGE]        ████░░░░ [N]건 ([금액]) ← [짧은 해석]
+[STAGE]        ███░░░░░ [N]건 ([금액]) ← [짧은 해석]
+\`\`\`
+
+**👉 인사이트**: [stage/금액/전환 관점의 한두 문장]
+
+## **🚨 리스크 관리**
+
+### **AT_RISK 고위험 딜 ([N]건 / [금액])**
+
+| **딜명** | **회사** | **이슈** | **대응방안** |
+| --- | --- | --- | --- |
+| **[딜명]** | [회사] | [이슈] | [대응방안] |
+
+### **WATCH 주의 딜**
+
+- **[딜명]**: [공통 지연/의사결정/PoC 이슈] → [다음 액션]
+
+## **🎬 오늘의 실행 과제**
+
+### **오전 우선과제**
+
+1. ✅ **[회사/딜]**: [실행할 일] → [목표 결과]
+2. ✅ **[회사/딜]**: [실행할 일] → [목표 결과]
+
+### **오후 추적과제**
+
+1. ✅ **[회사/딜]**: [실행할 일] → [목표 결과]
+
+## **📞 주요 연락처 & 담당자**
+
+| **회사/딜** | **담당자** | **역할/빈도** | **다음액션일** |
+| --- | --- | --- | --- |
+| [회사/딜] | [담당자] | [역할/빈도] | [M/D] |
+
+## **⚡ 금주/이번 달 마감 예상**
+
+- **확정 가능**: [딜명] ([금액])
+- **조건부 가능**: [딜명] ([금액]) - [조건]
+- **위험**: [딜명] ([금액]) - [확인 필요]
+
+**금주 실현 목표**: **[금액 범위]** ([건수])
+
 The answer should be substantial, readable, and executive-useful. Do not be terse.`;
 
 const hasAny = (value: string, patterns: string[]): boolean =>
