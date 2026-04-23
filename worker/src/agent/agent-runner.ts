@@ -255,6 +255,15 @@ export class AgentRunner {
     const context: JsonRecord = {};
 
     try {
+      context.runtime = {
+        currentDate: new Date().toISOString(),
+        currentDateKst: new Intl.DateTimeFormat('en-CA', {
+          dateStyle: 'short',
+          timeStyle: 'medium',
+          timeZone: 'Asia/Seoul',
+        }).format(new Date()),
+        timeZone: 'Asia/Seoul',
+      };
       const toolCatalog = await this.policyGateway.callReadTool(
         'get_tool_catalog',
         {

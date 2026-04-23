@@ -163,7 +163,8 @@ export class CodexCliAgentAdapter implements AgentAdapter {
 const buildCodexPrompt = (input: AgentAdapterInput): string =>
   [
     input.systemPrompt,
-    'Use the MCP catalog and tool history in the request context. Return one JSON object only, with no markdown and no surrounding commentary.',
+    'Use the MCP catalog and tool history in the request context. Return one JSON object only, with no markdown outside the JSON object and no surrounding commentary.',
+    'The assistantMessage field may contain Slack mrkdwn with headings, tables, lists, and emoji when useful. Do not make report-style answers artificially short.',
     'If you need a schema before using a CRM tool, request learn_tools first. To run CRM tools, request execute_tool with { toolName, arguments }. If a write is needed, request execute_tool for that write tool so the worker can create an approval draft.',
     'JSON shape:',
     JSON.stringify(
