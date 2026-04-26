@@ -78,6 +78,13 @@ const handler = async (event: RoutePayload<unknown>): Promise<RouteResponse> => 
     endpoint: 'apply',
     approvedBySlackUserId: interactivity.userId,
     responseUrl: interactivity.responseUrl,
+    slack: {
+      channelId: interactivity.channelId,
+      messageTs: interactivity.slackMessageTs,
+      teamId: interactivity.teamId,
+      threadTs: interactivity.slackThreadTs,
+      userId: interactivity.userId,
+    },
     slackAgentRequestId: interactivity.slackAgentRequestId,
     slackAgentApprovalId: interactivity.slackAgentApprovalId,
     workerPayload: interactivity.workerPayload,

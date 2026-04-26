@@ -4,6 +4,7 @@ import type {
   SlackAgentProcessRequest,
   ToolExecutionRecord,
   WriteDraft,
+  WriteDraftLinkTarget,
 } from '../types';
 import type { ToolPolicyGateway } from '../policy/tool-policy-gateway';
 import {
@@ -40,17 +41,17 @@ export class AgentResultPersistence {
     const lastProcessedAt = new Date().toISOString();
 
     try {
-      for (const draft of writeDrafts) {
+      if (writeDrafts.length > 0) {
         const approvalResult = await this.policyGateway.callSystemWriteTool(
           'create_slack_agent_approval',
           {
-            actions: { drafts: [draft] },
+            actions: { drafts: writeDrafts },
             position: 'first',
             slackAgentRequestId: request.slackAgentRequestId,
             status: 'PENDING',
             summary: assistantMessage,
-            title: `Approval for ${draft.toolName}`,
-            workerPayload: { draft },
+            title: buildApprovalTitle(writeDrafts),
+            workerPayload: { drafts: writeDrafts },
           },
         );
         const approvalId = extractRecordId(approvalResult);
@@ -146,11 +147,35 @@ export class AgentResultPersistence {
     }
   }
 
-  public async loadDraftFromApproval(
+  public async recordApplyFailure(
+    request: SlackAgentApplyRequest,
+    errorMessage: string,
+  ): Promise<void> {
+    try {
+      if (request.slackAgentApprovalId ?? request.approvalId) {
+        await this.policyGateway.callSystemWriteTool(
+          'update_slack_agent_approval',
+          {
+            appliedResult: {
+              error: sanitizeWorkerErrorMessage(errorMessage),
+            },
+            decidedAt: new Date().toISOString(),
+            id: request.slackAgentApprovalId ?? request.approvalId,
+            slackApproverUserId: request.approvedBySlackUserId,
+            status: 'APPLY_FAILED',
+          },
+        );
+      }
+    } catch {
+      // Failure persistence is best effort; Slack still receives a safe error message.
+    }
+  }
+
+  public async loadDraftsFromApproval(
     slackAgentApprovalId: string | undefined,
-  ): Promise<WriteDraft | null> {
+  ): Promise<WriteDraft[]> {
     if (!slackAgentApprovalId) {
-      return null;
+      return [];
     }
 
     const toolNames = [
@@ -163,17 +188,17 @@ export class AgentResultPersistence {
         const result = await this.policyGateway.callReadTool(toolName, {
           id: slackAgentApprovalId,
         });
-        const draft = findWriteDraft(result);
+        const drafts = findWriteDrafts(result);
 
-        if (draft) {
-          return draft;
+        if (drafts.length > 0) {
+          return drafts;
         }
       } catch {
         // Try the next naming convention exposed by the MCP catalog.
       }
     }
 
-    return null;
+    return [];
   }
 
   private async persistToolTraces({
@@ -243,31 +268,44 @@ const parseJsonText = (value: string): unknown => {
   }
 };
 
-const findWriteDraft = (value: unknown): WriteDraft | null => {
+const findWriteDrafts = (value: unknown): WriteDraft[] => {
   if (!isJsonRecord(value)) {
-    return null;
+    return [];
   }
 
   const directDraft = normalizeWriteDraft(value);
 
   if (directDraft) {
-    return directDraft;
+    return [directDraft];
+  }
+
+  const directDrafts = Array.isArray(value.drafts)
+    ? value.drafts.flatMap(normalizeWriteDraftCandidate)
+    : [];
+
+  if (directDrafts.length > 0) {
+    return directDrafts;
   }
 
   for (const candidateKey of [
+    'drafts',
     'draft',
+    'actions',
     'workerPayload',
     'appliedResult',
     'result',
+    'records',
     'data',
     'record',
     'slackAgentApproval',
   ]) {
     const nestedValue = value[candidateKey];
-    const nestedDraft = findWriteDraft(nestedValue);
+    const nestedDrafts = Array.isArray(nestedValue)
+      ? nestedValue.flatMap(findWriteDrafts)
+      : findWriteDrafts(nestedValue);
 
-    if (nestedDraft) {
-      return nestedDraft;
+    if (nestedDrafts.length > 0) {
+      return nestedDrafts;
     }
   }
 
@@ -277,15 +315,25 @@ const findWriteDraft = (value: unknown): WriteDraft | null => {
         continue;
       }
 
-      const nestedDraft = findWriteDraft(parseJsonText(contentItem.text));
+      const nestedDrafts = findWriteDrafts(parseJsonText(contentItem.text));
 
-      if (nestedDraft) {
-        return nestedDraft;
+      if (nestedDrafts.length > 0) {
+        return nestedDrafts;
       }
     }
   }
 
-  return null;
+  return [];
+};
+
+const normalizeWriteDraftCandidate = (value: unknown): WriteDraft[] => {
+  if (!isJsonRecord(value)) {
+    return [];
+  }
+
+  const draft = normalizeWriteDraft(value);
+
+  return draft ? [draft] : [];
 };
 
 const normalizeWriteDraft = (value: JsonRecord): WriteDraft | null => {
@@ -297,6 +345,8 @@ const normalizeWriteDraft = (value: JsonRecord): WriteDraft | null => {
     return null;
   }
 
+  const linkTargets = readLinkTargets(value.linkTargets);
+
   return {
     approvalPolicy: 'slack_user_approval_required',
     arguments: value.arguments,
@@ -305,10 +355,41 @@ const normalizeWriteDraft = (value: JsonRecord): WriteDraft | null => {
         ? value.createdAt
         : new Date().toISOString(),
     id: value.id,
+    ...(linkTargets.length > 0 ? { linkTargets } : {}),
     reason: typeof value.reason === 'string' ? value.reason : undefined,
     status: 'pending_approval',
     toolName: value.toolName,
   };
+};
+
+const readLinkTargets = (value: unknown): WriteDraftLinkTarget[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (
+      !isJsonRecord(item) ||
+      typeof item.targetFieldName !== 'string' ||
+      typeof item.targetRecordId !== 'string'
+    ) {
+      return [];
+    }
+
+    const position = item.position;
+
+    return [
+      {
+        ...(position === 'first' ||
+        position === 'last' ||
+        typeof position === 'number'
+          ? { position }
+          : {}),
+        targetFieldName: item.targetFieldName,
+        targetRecordId: item.targetRecordId,
+      },
+    ];
+  });
 };
 
 const extractRecordId = (value: unknown): string | null => {
@@ -343,4 +424,12 @@ const extractRecordId = (value: unknown): string | null => {
   }
 
   return null;
+};
+
+const buildApprovalTitle = (writeDrafts: WriteDraft[]): string => {
+  if (writeDrafts.length === 1) {
+    return `Approval for ${writeDrafts[0]?.toolName ?? 'CRM write'}`;
+  }
+
+  return `Approval for ${writeDrafts.length} CRM changes`;
 };

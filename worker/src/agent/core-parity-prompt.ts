@@ -102,6 +102,7 @@ Twenty CRM MCP Server workflow:
 1. get_tool_catalog to discover tools.
 2. learn_tools to get input schemas and descriptions.
 3. execute_tool to run learned tools.
+4. For multi-action write requests, submit_approval_draft may bundle concrete write actions into one Slack approval after read validation.
 
 Never guess tool names. Always use names from get_tool_catalog.
 Use load_skills for guidance on complex tasks like workflow, dashboard, metadata, schema, view, or careful data manipulation.
@@ -134,13 +135,21 @@ Allowed immediately:
 - learn_tools
 - load_skills
 - search_help_center
+- submit_approval_draft, but only to capture concrete CRM write actions for Slack approval
 - execute_tool for read tools named find_*, find_one_*, group_by_*
 
 Approval required:
 - execute_tool for create_*, create_many_*, update_*, update_many_*, delete_* creates a Slack approval draft.
+- submit_approval_draft with create_*, create_many_*, update_*, update_many_*, delete_* actions also creates Slack approval drafts.
 - Do not say a create, update, or delete was applied unless the request is an approval apply result.
 - Before write drafts, verify target records or duplicate risk with read tools whenever possible.
-- For bulk writes, verify scope and summarize count/filter/risk before drafting.`;
+- For bulk writes, verify scope and summarize count/filter/risk before drafting.
+- If you are preparing an approval summary, you MUST first create captured write drafts with execute_tool write calls or submit_approval_draft.
+- Use submit_approval_draft when the user gives a realistic short field update or meeting recap that maps to several CRM write actions.
+- When creating notes or tasks that must be attached to an opportunity, company, person, or another CRM record, use submit_approval_draft and add linkTargets metadata on that draft item. Do not put relation fields directly into create_note/create_task arguments unless learn_tools says the create tool accepts them.
+- linkTargets format: [{ "targetFieldName": "targetOpportunity" | "targetCompany" | "targetPerson" | another learned NoteTarget/TaskTarget target field, "targetRecordId": "<verified CRM record id>", "position": "first" }]. The worker converts these to the correct join-column writes such as targetOpportunityId.
+- For a meeting recap, normally link the note and every follow-up task to the verified opportunity, and also to the verified person/company when the user context makes that useful.
+- Describing a draft in final text without captured write drafts is not allowed.`;
 
 const FINAL_ANSWER_RULES = `## Final Answer Rules
 
@@ -148,6 +157,8 @@ const FINAL_ANSWER_RULES = `## Final Answer Rules
 - Do not run shell commands, inspect local files, or use the local filesystem for CRM work.
 - The final answer must be Slack-ready Korean text.
 - If a write action is required, return an approval-ready summary and make clear that it is pending approval.
+- For write requests, the final answer is valid only after the policy MCP has returned approvalRequired/write draft results from execute_tool.
+- For multi-action write requests, the final answer is valid only after submit_approval_draft or execute_tool has returned approvalRequired/write draft results.
 - If some data could not be fetched after a reasonable retry, continue with available evidence and list the missing item under "확인 필요".`;
 
 const buildUserRuntimeContextSection = (runtime: JsonRecord): string =>

@@ -71,6 +71,8 @@ export function buildWorkerHandoffRequest({
           slackAgentApprovalId,
           approvedBySlackUserId,
           ...(responseUrl ? { responseUrl } : {}),
+          ...(slackBotToken ? { slackBotToken } : {}),
+          ...(slack ? { slack } : {}),
           ...(workerPayload ?? {}),
         };
 

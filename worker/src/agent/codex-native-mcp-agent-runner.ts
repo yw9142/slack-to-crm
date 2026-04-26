@@ -10,6 +10,11 @@ import {
   buildRuntimeContext,
 } from './native-mcp-prompt';
 import { selectCoreParityProfile } from './core-parity-profiles';
+import {
+  buildMissingWriteDraftErrorMessage,
+  buildMissingWriteDraftRetryPrompt,
+  shouldRetryMissingWriteDraft,
+} from './write-draft-guard';
 import type { PolicyMcpGateway } from '../mcp/policy-mcp-gateway';
 import type { ToolPolicyGateway } from '../policy/tool-policy-gateway';
 import type {
@@ -75,20 +80,56 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     };
 
     try {
-      const assistantMessage = await this.runCodex({
+      await this.recordProcessStarted(request);
+
+      const initialPrompt = buildNativeMcpPrompt({
+        profile: promptProfile,
+        request,
+        runtime: buildRuntimeContext(),
+      });
+      let assistantMessage = await this.runCodex({
         mcpUrl: `${this.policyMcpBaseUrl}/mcp/${encodeURIComponent(
           policySession.id,
         )}`,
         policyToken: policySession.token,
-        prompt: buildNativeMcpPrompt({
-          profile: promptProfile,
-          request,
-          runtime: buildRuntimeContext(),
-        }),
+        prompt: initialPrompt,
       });
-      const sessionResult = this.policyMcpGateway.getSessionResult(
+      let sessionResult = this.policyMcpGateway.getSessionResult(
         policySession.id,
       );
+
+      if (
+        shouldRetryMissingWriteDraft({
+          assistantMessage,
+          profile: promptProfile,
+          request,
+          writeDraftCount: sessionResult.writeDrafts.length,
+        })
+      ) {
+        assistantMessage = await this.runCodex({
+          mcpUrl: `${this.policyMcpBaseUrl}/mcp/${encodeURIComponent(
+            policySession.id,
+          )}`,
+          policyToken: policySession.token,
+          prompt: buildMissingWriteDraftRetryPrompt({
+            assistantMessage,
+            originalPrompt: initialPrompt,
+          }),
+        });
+        sessionResult = this.policyMcpGateway.getSessionResult(policySession.id);
+      }
+
+      if (
+        shouldRetryMissingWriteDraft({
+          assistantMessage,
+          profile: promptProfile,
+          request,
+          writeDraftCount: sessionResult.writeDrafts.length,
+        })
+      ) {
+        throw new Error(buildMissingWriteDraftErrorMessage());
+      }
+
       const persistenceMetadata = await this.persistence.persistProcessResult({
         assistantMessage,
         metadata,
@@ -96,6 +137,13 @@ export class CodexNativeMcpAgentRunner implements AgentService {
         toolResults: sessionResult.toolResults,
         writeDrafts: sessionResult.writeDrafts,
       });
+      const approvalIds = readStringArray(persistenceMetadata, 'approvalIds');
+
+      if (sessionResult.writeDrafts.length > 0 && approvalIds.length === 0) {
+        throw new Error(
+          'CRM 승인 레코드 생성에 실패했습니다. 쓰기 draft는 만들었지만 Slack approval 버튼을 만들 수 없어 CRM에는 반영하지 않았습니다.',
+        );
+      }
 
       return {
         assistantMessage,
@@ -116,31 +164,60 @@ export class CodexNativeMcpAgentRunner implements AgentService {
   public async apply(
     request: SlackAgentApplyRequest,
   ): Promise<SlackAgentApplyResponse> {
-    const draft =
-      request.draft ??
-      (await this.persistence.loadDraftFromApproval(
-        request.slackAgentApprovalId,
-      ));
+    const drafts = request.draft
+      ? [request.draft]
+      : await this.persistence.loadDraftsFromApproval(
+          request.slackAgentApprovalId,
+        );
 
-    if (!draft) {
+    if (drafts.length === 0) {
       throw new Error('Approved apply request does not include a write draft');
     }
 
-    const applyResult = await this.policyGateway.applyApprovedDraft({
-      approvalId: request.approvalId ?? request.slackAgentApprovalId,
-      approvedBySlackUserId: request.approvedBySlackUserId ?? 'unknown-slack-user',
-      draft,
-    });
+    const applyResults = [];
+
+    for (const draft of drafts) {
+      applyResults.push(
+        ...(await this.policyGateway.applyApprovedDraftWithRelations({
+          approvalId: request.approvalId ?? request.slackAgentApprovalId,
+          approvedBySlackUserId:
+            request.approvedBySlackUserId ?? 'unknown-slack-user',
+          draft,
+        })),
+      );
+    }
 
     await this.persistence.persistApplyResult({
       approvalId: request.approvalId ?? request.slackAgentApprovalId,
-      applyResult: applyResult.result,
+      applyResult: {
+        results: applyResults.map((applyResult) => ({
+          draftId: applyResult.draftId,
+          result: applyResult.result,
+        })),
+      },
       request,
     });
+    const firstApplyResult = applyResults[0];
+
+    if (!firstApplyResult) {
+      throw new Error('Approved apply request did not produce a result');
+    }
 
     return {
-      draftId: applyResult.draftId,
-      result: applyResult.result,
+      draftId: firstApplyResult.draftId,
+      result:
+        applyResults.length === 1
+          ? firstApplyResult.result
+          : {
+              results: applyResults.map((applyResult) => ({
+                draftId: applyResult.draftId,
+                result: applyResult.result,
+              })),
+            },
+      results: applyResults.map((applyResult) => ({
+        draftId: applyResult.draftId,
+        result: applyResult.result,
+      })),
       status: 'applied',
       toolName: 'execute_tool',
     };
@@ -151,6 +228,26 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     errorMessage: string,
   ): Promise<void> {
     return this.persistence.recordProcessFailure(request, errorMessage);
+  }
+
+  public recordApplyFailure(
+    request: SlackAgentApplyRequest,
+    errorMessage: string,
+  ): Promise<void> {
+    return this.persistence.recordApplyFailure(request, errorMessage);
+  }
+
+  private async recordProcessStarted(
+    request: SlackAgentProcessRequest,
+  ): Promise<void> {
+    try {
+      await this.policyGateway.callSystemWriteTool('update_slack_agent_request', {
+        id: request.slackAgentRequestId,
+        status: 'PROCESSING',
+      });
+    } catch {
+      // Status visibility is useful but should not block processing.
+    }
   }
 
   private async runCodex({
@@ -280,6 +377,19 @@ export class CodexNativeMcpAgentRunner implements AgentService {
     });
   }
 }
+
+const readStringArray = (
+  value: JsonRecord | undefined,
+  key: string,
+): string[] => {
+  const candidate = value?.[key];
+
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+
+  return candidate.filter((item): item is string => typeof item === 'string');
+};
 
 const buildCodexProcessEnv = ({
   codexHome,

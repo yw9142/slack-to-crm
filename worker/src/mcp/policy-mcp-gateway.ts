@@ -13,6 +13,7 @@ import type {
   SlackAgentProcessRequest,
   ToolExecutionRecord,
   WriteDraft,
+  WriteDraftLinkTarget,
 } from '../types';
 import type { ToolPolicyGateway } from '../policy/tool-policy-gateway';
 import {
@@ -21,6 +22,7 @@ import {
   isJsonRecord,
   normalizeJsonRecord,
 } from '../policy/tool-execution-record';
+import { classifyToolName } from '../policy/tool-policy-gateway';
 
 type JsonRpcId = string | number | null;
 
@@ -235,6 +237,10 @@ export class PolicyMcpGateway {
     toolName: string,
     toolArguments: JsonRecord,
   ): Promise<McpToolCallResult> {
+    if (toolName === 'submit_approval_draft') {
+      return this.submitApprovalDrafts(session, toolArguments);
+    }
+
     const startedAt = this.now();
     const normalizedToolArguments = withPolicyToolDefaults(
       toolName,
@@ -352,10 +358,115 @@ export class PolicyMcpGateway {
       isError: true,
     };
   }
+
+  private async submitApprovalDrafts(
+    session: PolicyMcpSession,
+    toolArguments: JsonRecord,
+  ): Promise<McpToolCallResult> {
+    const startedAt = this.now();
+    const draftInputs = readDraftInputs(toolArguments);
+
+    if (draftInputs.length === 0) {
+      return {
+        content: [
+          {
+            text: JSON.stringify({
+              error:
+                'submit_approval_draft requires a non-empty drafts array. Each draft needs toolName and arguments.',
+            }),
+            type: 'text',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const capturedDrafts: WriteDraft[] = [];
+
+    for (const draftInput of draftInputs) {
+      if (classifyToolName(draftInput.toolName) !== 'write') {
+        return {
+          content: [
+            {
+              text: JSON.stringify({
+                error: `submit_approval_draft only accepts CRM write tools. Received ${draftInput.toolName}.`,
+              }),
+              type: 'text',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const policyResult = await this.policyGateway.executeToolCall({
+        arguments: draftInput.arguments,
+        id: randomUUID(),
+        name: draftInput.toolName,
+        reason: draftInput.reason,
+      });
+
+      if (policyResult.kind !== 'write_draft') {
+        return {
+          content: [
+            {
+              text: JSON.stringify({
+                error: `Failed to create approval draft for ${draftInput.toolName}.`,
+              }),
+              type: 'text',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      capturedDrafts.push({
+        ...policyResult.draft,
+        ...(draftInput.linkTargets.length > 0
+          ? { linkTargets: draftInput.linkTargets }
+          : {}),
+      });
+    }
+
+    const finishedAt = this.now();
+
+    for (const draft of capturedDrafts) {
+      session.writeDrafts.push(draft);
+      session.toolResults.push({
+        draft,
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        input: draft.arguments,
+        kind: 'write_draft',
+        policySessionId: session.id,
+        promptProfile: session.profile,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        toolCallId: draft.id,
+        toolName: draft.toolName,
+      });
+    }
+
+    return {
+      content: [
+        {
+          text: JSON.stringify({
+            approvalRequired: true,
+            drafts: capturedDrafts,
+            message:
+              'Write actions captured as one Slack approval draft. Do not claim they have been applied.',
+            summary:
+              typeof toolArguments.summary === 'string'
+                ? toolArguments.summary
+                : undefined,
+          }),
+          type: 'text',
+        },
+      ],
+    };
+  }
 }
 
 const POLICY_MCP_INSTRUCTIONS =
-  'Slack-to-CRM policy MCP server. Follow this workflow: (1) get_tool_catalog to discover tools, (2) learn_tools to get input schemas, (3) execute_tool to run them. Never guess tool names. For comparative/grouped CRM analytics, use group_by tools. Use search_help_center for Twenty usage/help. Writes are never applied here: create/update/delete actions become Slack approval drafts.';
+  'Slack-to-CRM policy MCP server. Follow this workflow: (1) get_tool_catalog to discover tools, (2) learn_tools to get input schemas, (3) execute_tool to run them. Never guess tool names. For comparative/grouped CRM analytics, use group_by tools. Use search_help_center for Twenty usage/help. Writes are never applied here: create/update/delete actions become Slack approval drafts. For create_note/create_task drafts that must attach to CRM records, submit_approval_draft can include linkTargets metadata; the worker will create Note Target or Task Target records only after Slack approval.';
 
 const objectSchema = {
   additionalProperties: true,
@@ -439,6 +550,75 @@ const POLICY_MCP_TOOLS = [
   },
   {
     description:
+      'Submit one or more concrete CRM write actions as a Slack approval draft after validating targets with read tools. Use this for natural-language meeting updates that require several create/update/delete actions. This never applies CRM writes immediately.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        drafts: {
+          description:
+            'Concrete write actions to approve. Each item must use an exact CRM write tool name and schema-compatible arguments.',
+          items: {
+            additionalProperties: false,
+            properties: {
+              arguments: objectSchema,
+              reason: {
+                description: 'Short human-readable reason for this write.',
+                type: 'string',
+              },
+              linkTargets: {
+                description:
+                  'Optional post-create CRM links for create_note/create_many_notes/create_task/create_many_tasks. Use targetFieldName values from NoteTarget/TaskTarget schemas such as targetOpportunity, targetCompany, or targetPerson; the worker writes the matching join column such as targetOpportunityId. targetRecordId must be a verified CRM record id.',
+                items: {
+                  additionalProperties: false,
+                  properties: {
+                    position: {
+                      description:
+                        'Relation ordering. Use "first" unless the user explicitly asks otherwise.',
+                      anyOf: [
+                        { type: 'number' },
+                        { const: 'first', type: 'string' },
+                        { const: 'last', type: 'string' },
+                      ],
+                    },
+                    targetFieldName: {
+                      description:
+                        'Exact relation target field name, for example targetOpportunity, targetCompany, or targetPerson.',
+                      type: 'string',
+                    },
+                    targetRecordId: {
+                      description:
+                        'Verified id of the opportunity, company, person, or other target record.',
+                      type: 'string',
+                    },
+                  },
+                  required: ['targetFieldName', 'targetRecordId'],
+                  type: 'object',
+                },
+                type: 'array',
+              },
+              toolName: {
+                description:
+                  'Exact write tool name, for example update_opportunity or create_task.',
+                type: 'string',
+              },
+            },
+            required: ['toolName', 'arguments'],
+            type: 'object',
+          },
+          type: 'array',
+        },
+        summary: {
+          description: 'Short summary shown in the approval context.',
+          type: 'string',
+        },
+      },
+      required: ['drafts'],
+      type: 'object',
+    },
+    name: 'submit_approval_draft',
+  },
+  {
+    description:
       'Search the Twenty documentation and help center for setup, usage, and troubleshooting guidance.',
     inputSchema: {
       additionalProperties: true,
@@ -459,6 +639,64 @@ const readReason = (toolArguments: JsonRecord): string | undefined => {
   const reason = toolArguments.reason;
 
   return typeof reason === 'string' ? reason : undefined;
+};
+
+const readDraftInputs = (
+  toolArguments: JsonRecord,
+): Array<{
+  arguments: JsonRecord;
+  linkTargets: WriteDraftLinkTarget[];
+  reason?: string;
+  toolName: string;
+}> => {
+  const drafts = Array.isArray(toolArguments.drafts)
+    ? toolArguments.drafts
+    : [];
+
+  return drafts.flatMap((draft) => {
+    if (!isJsonRecord(draft) || typeof draft.toolName !== 'string') {
+      return [];
+    }
+
+    return [
+      {
+        arguments: isJsonRecord(draft.arguments) ? draft.arguments : {},
+        linkTargets: readLinkTargets(draft.linkTargets),
+        reason: typeof draft.reason === 'string' ? draft.reason : undefined,
+        toolName: draft.toolName,
+      },
+    ];
+  });
+};
+
+const readLinkTargets = (value: unknown): WriteDraftLinkTarget[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (
+      !isJsonRecord(item) ||
+      typeof item.targetFieldName !== 'string' ||
+      typeof item.targetRecordId !== 'string'
+    ) {
+      return [];
+    }
+
+    const position = item.position;
+
+    return [
+      {
+        ...(position === 'first' ||
+        position === 'last' ||
+        typeof position === 'number'
+          ? { position }
+          : {}),
+        targetFieldName: item.targetFieldName,
+        targetRecordId: item.targetRecordId,
+      },
+    ];
+  });
 };
 
 const withPolicyToolDefaults = (

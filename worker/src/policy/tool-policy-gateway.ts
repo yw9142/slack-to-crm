@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
 import type { McpToolCallResult, TwentyMcpToolClient } from '../mcp/types';
-import type { AgentToolCall, JsonRecord, WriteDraft } from '../types';
+import type {
+  AgentToolCall,
+  JsonRecord,
+  WriteDraft,
+  WriteDraftLinkTarget,
+} from '../types';
 
 const READ_TOOL_PREFIXES = ['find_', 'find_one_', 'group_by_'] as const;
 const WRITE_TOOL_PREFIXES = [
@@ -156,6 +161,18 @@ export class ToolPolicyGateway {
     };
   }
 
+  public async applyApprovedDraftWithRelations(
+    input: ApplyApprovedDraftInput,
+  ): Promise<ApplyApprovedDraftResult[]> {
+    const primaryResult = await this.applyApprovedDraft(input);
+    const relationResults = await this.applyPostCreateLinkTargets({
+      draft: input.draft,
+      primaryResult: primaryResult.result,
+    });
+
+    return [primaryResult, ...relationResults];
+  }
+
   public callReadTool(
     toolName: string,
     toolArguments: JsonRecord = {},
@@ -180,11 +197,19 @@ export class ToolPolicyGateway {
     toolCall: AgentToolCall,
     toolArguments: JsonRecord,
   ): WriteDraft {
+    const normalizedWriteInput = extractInlineLinkTargets(
+      toolCall.name,
+      toolArguments,
+    );
+
     return {
       approvalPolicy: 'slack_user_approval_required',
-      arguments: toolArguments,
+      arguments: normalizedWriteInput.arguments,
       createdAt: this.now().toISOString(),
       id: this.createDraftId(),
+      ...(normalizedWriteInput.linkTargets.length > 0
+        ? { linkTargets: normalizedWriteInput.linkTargets }
+        : {}),
       reason: toolCall.reason,
       status: 'pending_approval',
       toolName: toolCall.name,
@@ -219,6 +244,75 @@ export class ToolPolicyGateway {
         `Cannot apply draft ${draft.id}: bulk create requires records`,
       );
     }
+  }
+
+  private async applyPostCreateLinkTargets({
+    draft,
+    primaryResult,
+  }: {
+    draft: WriteDraft;
+    primaryResult: McpToolCallResult;
+  }): Promise<ApplyApprovedDraftResult[]> {
+    const linkTargets = normalizeLinkTargets(draft.linkTargets);
+    const relationConfig = getRelationConfigForDraft(draft.toolName);
+
+    if (!relationConfig || linkTargets.length === 0) {
+      return [];
+    }
+
+    const createdRecordIds = extractCreatedRecordIds(primaryResult);
+
+    if (createdRecordIds.length === 0) {
+      return [
+        {
+          draftId: `${draft.id}:link-targets-missing-created-id`,
+          result: {
+            content: [
+              {
+                text: JSON.stringify({
+                  error:
+                    'Primary create result did not include created record ids, so relation target records were not created.',
+                  linkTargets,
+                  toolName: draft.toolName,
+                }),
+                type: 'text',
+              },
+            ],
+            isError: true,
+          },
+          toolName: 'execute_tool',
+        },
+      ];
+    }
+
+    const relationRecords = createdRecordIds.flatMap((createdRecordId) =>
+      linkTargets.map((linkTarget) => ({
+        [toRelationTargetIdFieldName(linkTarget.targetFieldName)]:
+          linkTarget.targetRecordId,
+        [relationConfig.sourceIdFieldName]: createdRecordId,
+        position: linkTarget.position ?? 'first',
+      })),
+    );
+    const applyResults: ApplyApprovedDraftResult[] = [];
+
+    for (const [chunkIndex, records] of chunkArray(
+      relationRecords,
+      20,
+    ).entries()) {
+      const result = await this.executeTwentyTool(
+        this.writeMcpClient,
+        relationConfig.createManyToolName,
+        { records },
+      );
+
+      applyResults.push({
+        draftId: `${draft.id}:link-targets:${chunkIndex + 1}`,
+        result,
+        toolName: 'execute_tool',
+      });
+    }
+
+    return applyResults;
   }
 
   private async executeCoreStyleToolCall(
@@ -304,3 +398,172 @@ export class ToolPolicyGateway {
 
 const isJsonRecord = (value: unknown): value is JsonRecord =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const normalizeLinkTargets = (
+  linkTargets: WriteDraft['linkTargets'],
+): WriteDraftLinkTarget[] => {
+  if (!Array.isArray(linkTargets)) {
+    return [];
+  }
+
+  return linkTargets.flatMap((linkTarget) => {
+    if (
+      typeof linkTarget.targetFieldName !== 'string' ||
+      typeof linkTarget.targetRecordId !== 'string' ||
+      !linkTarget.targetFieldName.startsWith('target')
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        ...(linkTarget.position === 'first' ||
+        linkTarget.position === 'last' ||
+        typeof linkTarget.position === 'number'
+          ? { position: linkTarget.position }
+          : {}),
+        targetFieldName: linkTarget.targetFieldName,
+        targetRecordId: linkTarget.targetRecordId,
+      },
+    ];
+  });
+};
+
+const extractInlineLinkTargets = (
+  toolName: string,
+  toolArguments: JsonRecord,
+): {
+  arguments: JsonRecord;
+  linkTargets: WriteDraftLinkTarget[];
+} => {
+  if (toolName !== 'create_note' && toolName !== 'create_task') {
+    return {
+      arguments: toolArguments,
+      linkTargets: [],
+    };
+  }
+
+  const linkTargets: WriteDraftLinkTarget[] = [];
+  const normalizedArguments: JsonRecord = {};
+
+  for (const [key, value] of Object.entries(toolArguments)) {
+    if (
+      key.startsWith('target') &&
+      typeof value === 'string' &&
+      value.length > 0
+    ) {
+      linkTargets.push({
+        targetFieldName: key,
+        targetRecordId: value,
+      });
+      continue;
+    }
+
+    if (key === 'linkTargets') {
+      linkTargets.push(
+        ...normalizeLinkTargets(value as WriteDraft['linkTargets']),
+      );
+      continue;
+    }
+
+    normalizedArguments[key] = value;
+  }
+
+  return {
+    arguments: normalizedArguments,
+    linkTargets,
+  };
+};
+
+const getRelationConfigForDraft = (
+  toolName: string,
+):
+  | {
+      createManyToolName: 'create_many_note_targets' | 'create_many_task_targets';
+      sourceIdFieldName: 'noteId' | 'taskId';
+    }
+  | undefined => {
+  if (toolName === 'create_note' || toolName === 'create_many_notes') {
+    return {
+      createManyToolName: 'create_many_note_targets',
+      sourceIdFieldName: 'noteId',
+    };
+  }
+
+  if (toolName === 'create_task' || toolName === 'create_many_tasks') {
+    return {
+      createManyToolName: 'create_many_task_targets',
+      sourceIdFieldName: 'taskId',
+    };
+  }
+
+  return undefined;
+};
+
+const toRelationTargetIdFieldName = (targetFieldName: string): string =>
+  targetFieldName.endsWith('Id') ? targetFieldName : `${targetFieldName}Id`;
+
+const extractCreatedRecordIds = (value: unknown): string[] => {
+  const ids = new Set<string>();
+  const visit = (candidate: unknown): void => {
+    if (!isJsonRecord(candidate)) {
+      return;
+    }
+
+    if (typeof candidate.id === 'string') {
+      ids.add(candidate.id);
+    }
+
+    if (typeof candidate.recordId === 'string') {
+      ids.add(candidate.recordId);
+    }
+
+    for (const nestedKey of ['result', 'record', 'records', 'data']) {
+      const nestedValue = candidate[nestedKey];
+
+      if (Array.isArray(nestedValue)) {
+        nestedValue.forEach(visit);
+      } else {
+        visit(nestedValue);
+      }
+    }
+
+    if (Array.isArray(candidate.recordReferences)) {
+      candidate.recordReferences.forEach(visit);
+    }
+
+    if (Array.isArray(candidate.content)) {
+      for (const contentItem of candidate.content) {
+        if (
+          !isJsonRecord(contentItem) ||
+          typeof contentItem.text !== 'string'
+        ) {
+          continue;
+        }
+
+        try {
+          visit(JSON.parse(contentItem.text) as unknown);
+        } catch {
+          // Ignore non-JSON text content.
+        }
+      }
+    }
+  };
+
+  visit(value);
+
+  return [...ids];
+};
+
+const chunkArray = <TValue>(
+  values: TValue[],
+  chunkSize: number,
+): TValue[][] => {
+  const chunks: TValue[][] = [];
+
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+};

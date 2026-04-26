@@ -85,6 +85,10 @@ const UPDATE_PATTERNS = [
   '바꿔',
   '고쳐',
   '갱신',
+  '반영',
+  '저장',
+  '입력',
+  '기록',
   'patch',
 ];
 const CREATE_PATTERNS = [
@@ -243,6 +247,7 @@ Before drafting a create action:
 - Learn the create tool schema and include only fields supported by the schema.
 - If required fields are missing, ask for the missing fields instead of fabricating them.
 - If enough data exists, call execute_tool with the create_* tool; the policy gateway will convert it to a Slack approval draft.
+- A final answer that only describes an approval draft is invalid unless at least one create_* write draft was actually captured by execute_tool.
 
 Final answer must be an approval-ready summary: what will be created, important fields, duplicate check result, and risks.`;
 
@@ -254,6 +259,7 @@ Before drafting an update action:
 - Learn the update tool schema and only include fields that are actually changing.
 - For relationship updates, verify referenced records first.
 - Call execute_tool with update_* only after the target is clear; the policy gateway will create a Slack approval draft.
+- A final answer that only describes an approval draft is invalid unless at least one update_* write draft was actually captured by execute_tool.
 
 Final answer must show the target record, before/after values when available, and approval status.`;
 
@@ -264,6 +270,7 @@ Before drafting a delete action:
 - If multiple records match, do not guess. Present candidates and ask the user to choose.
 - Explain that Twenty delete tools soft-delete records when that is what the tool description says.
 - Call execute_tool with delete_* only after the target is clear; the policy gateway will create a Slack approval draft.
+- A final answer that only describes an approval draft is invalid unless at least one delete_* write draft was actually captured by execute_tool.
 
 Final answer must show the target record, deletion impact, and approval status.`;
 
@@ -275,6 +282,7 @@ Bulk changes require extra caution:
 - If scope is ambiguous or too broad, ask for confirmation criteria before drafting.
 - For bulk updates/deletes, include the exact filter and expected affected scope in the approval summary.
 - The policy gateway will create Slack approval drafts for create_many_*, update_many_*, or delete_* tools.
+- A final answer that only describes an approval draft is invalid unless the bulk write draft was actually captured by execute_tool.
 
 Final answer must include scope, count if known, sample affected records, fields/actions, and risks.`;
 

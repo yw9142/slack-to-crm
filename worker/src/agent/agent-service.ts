@@ -14,4 +14,8 @@ export type AgentService = {
     request: SlackAgentProcessRequest,
     errorMessage: string,
   ) => Promise<void>;
+  recordApplyFailure: (
+    request: SlackAgentApplyRequest,
+    errorMessage: string,
+  ) => Promise<void>;
 };

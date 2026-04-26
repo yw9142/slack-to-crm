@@ -10,6 +10,7 @@ import type {
   SlackAgentProcessRequest,
   SlackAgentApplyResponse,
   WriteDraft,
+  WriteDraftLinkTarget,
 } from '../types';
 import { isJsonRecord } from '../types';
 import { isAuthorizedRequest } from './auth';
@@ -113,11 +114,14 @@ export const handleHttpRequest = async (
     }
 
     const parsedRequest = parseApplyRequest(body);
+    const slackBotToken =
+      readProcessSlackBotToken(body) ?? options.slackBotToken;
 
     if (parsedRequest.responseUrl) {
       runApplyInBackground({
         agentRunner: options.agentRunner,
         request: parsedRequest,
+        slackBotToken,
       });
       writeJson(response, 202, { status: 'accepted' });
       return;
@@ -213,6 +217,7 @@ const parseApplyRequest = (body: unknown): SlackAgentApplyRequest => {
     slackAgentRequestId: readString(body, 'slackAgentRequestId'),
     responseUrl:
       readString(body, 'responseUrl') ?? readString(body, 'slackResponseUrl'),
+    slack: parseSlackContext(body),
   };
 };
 
@@ -287,15 +292,48 @@ const parseWriteDraft = (value: unknown): WriteDraft => {
     throw new BadRequestError('Draft requires id, toolName, and createdAt');
   }
 
+  const linkTargets = readLinkTargets(value.linkTargets);
+
   return {
     approvalPolicy: 'slack_user_approval_required',
     arguments: readRecord(value, 'arguments') ?? {},
     createdAt,
     id,
+    ...(linkTargets.length > 0 ? { linkTargets } : {}),
     reason: readString(value, 'reason'),
     status: 'pending_approval',
     toolName,
   };
+};
+
+const readLinkTargets = (value: unknown): WriteDraftLinkTarget[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (
+      !isJsonRecord(item) ||
+      typeof item.targetFieldName !== 'string' ||
+      typeof item.targetRecordId !== 'string'
+    ) {
+      return [];
+    }
+
+    const position = item.position;
+
+    return [
+      {
+        ...(position === 'first' ||
+        position === 'last' ||
+        typeof position === 'number'
+          ? { position }
+          : {}),
+        targetFieldName: item.targetFieldName,
+        targetRecordId: item.targetRecordId,
+      },
+    ];
+  });
 };
 
 const readString = (
@@ -398,22 +436,28 @@ const handleProcessFailure = async ({
 const runApplyInBackground = ({
   agentRunner,
   request,
+  slackBotToken,
 }: {
   agentRunner: AgentService;
   request: SlackAgentApplyRequest;
+  slackBotToken?: string;
 }): void => {
   void agentRunner
     .apply(request)
     .then((result: SlackAgentApplyResponse) =>
-      safePostSlackApplyResponse({ request, result }),
+      safePostSlackApplyResponse({ request, result, slackBotToken }),
     )
-    .catch((error: unknown) =>
-      safePostSlackApplyResponse({
-        errorMessage:
-          error instanceof Error ? error.message : 'Unknown worker error',
+    .catch(async (error: unknown) => {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown worker error';
+
+      await agentRunner.recordApplyFailure(request, errorMessage);
+      await safePostSlackApplyResponse({
+        errorMessage,
         request,
-      }),
-    );
+        slackBotToken,
+      });
+    });
 };
 
 const safePostSlackProcessResponse = async (
